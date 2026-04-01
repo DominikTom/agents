@@ -11,7 +11,7 @@ import yaml
 from fastapi import FastAPI, Request, Form, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
+from starlette.templating import Jinja2Templates
 
 from src.common.config import load_config, PROJECT_ROOT, CONFIG_DIR
 from src.dashboard.auth import verify_login, verify_session, logout
@@ -23,7 +23,7 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 
 app = FastAPI(title="Agents Dashboard")
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
@@ -44,12 +44,17 @@ def require_auth(request: Request) -> bool:
     return verify_session(get_session_token(request))
 
 
+def render(request: Request, template: str, **kwargs):
+    """Render a template with request context."""
+    return templates.TemplateResponse(request, template, kwargs)
+
+
 # --- Auth routes ---
 
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+    return render(request, "login.html", error=None)
 
 
 @app.post("/login")
@@ -59,7 +64,7 @@ async def login_submit(request: Request, username: str = Form(...), password: st
         response = RedirectResponse(url="/", status_code=302)
         response.set_cookie("session_token", token, httponly=True, max_age=86400)
         return response
-    return templates.TemplateResponse("login.html", {"request": request, "error": "Nieprawidłowe dane logowania"})
+    return render(request, "login.html", error="Nieprawidłowe dane logowania")
 
 
 @app.get("/logout")
@@ -87,13 +92,12 @@ async def dashboard_page(request: Request):
         recent_reports = await db.get_reports(limit=5)
         recent_runs = await db.get_recent_runs(limit=10)
 
-        return templates.TemplateResponse("dashboard.html", {
-            "request": request,
-            "briefing_last": briefing_last,
-            "monitor_last": monitor_last,
-            "recent_reports": recent_reports,
-            "recent_runs": recent_runs,
-        })
+        return render(request, "dashboard.html",
+            briefing_last=briefing_last,
+            monitor_last=monitor_last,
+            recent_reports=recent_reports,
+            recent_runs=recent_runs,
+        )
     finally:
         await db.close()
 
@@ -111,13 +115,12 @@ async def reports_page(request: Request, agent: str | None = None, page: int = 1
         total = await db.get_reports_count(agent_name=agent)
         total_pages = max(1, (total + per_page - 1) // per_page)
 
-        return templates.TemplateResponse("reports.html", {
-            "request": request,
-            "reports": reports,
-            "current_page": page,
-            "total_pages": total_pages,
-            "agent_filter": agent,
-        })
+        return render(request, "reports.html",
+            reports=reports,
+            current_page=page,
+            total_pages=total_pages,
+            agent_filter=agent,
+        )
     finally:
         await db.close()
 
@@ -133,10 +136,7 @@ async def report_detail_page(request: Request, report_id: int):
         if not report:
             return RedirectResponse(url="/reports", status_code=302)
 
-        return templates.TemplateResponse("report_detail.html", {
-            "request": request,
-            "report": report,
-        })
+        return render(request, "report_detail.html", report=report)
     finally:
         await db.close()
 
@@ -158,15 +158,14 @@ async def velocity_page(request: Request):
                 persons[person] = []
             persons[person].append(record)
 
-        return templates.TemplateResponse("velocity.html", {
-            "request": request,
-            "persons": persons,
-            "velocity_json": json.dumps(
+        return render(request, "velocity.html",
+            persons=persons,
+            velocity_json=json.dumps(
                 {p: records for p, records in persons.items()},
                 ensure_ascii=False,
                 default=str,
             ),
-        })
+        )
     finally:
         await db.close()
 
@@ -187,12 +186,11 @@ async def config_page(request: Request):
     if connectors_path.exists():
         connectors_yaml = connectors_path.read_text(encoding="utf-8")
 
-    return templates.TemplateResponse("config.html", {
-        "request": request,
-        "agents_yaml": agents_yaml,
-        "connectors_yaml": connectors_yaml,
-        "saved": False,
-    })
+    return render(request, "config.html",
+        agents_yaml=agents_yaml,
+        connectors_yaml=connectors_yaml,
+        saved=False,
+    )
 
 
 @app.post("/config", response_class=HTMLResponse)
@@ -216,13 +214,12 @@ async def config_save(
         (CONFIG_DIR / "agents.yaml").write_text(agents_yaml, encoding="utf-8")
         (CONFIG_DIR / "connectors.yaml").write_text(connectors_yaml, encoding="utf-8")
 
-    return templates.TemplateResponse("config.html", {
-        "request": request,
-        "agents_yaml": agents_yaml,
-        "connectors_yaml": connectors_yaml,
-        "saved": error is None,
-        "error": error,
-    })
+    return render(request, "config.html",
+        agents_yaml=agents_yaml,
+        connectors_yaml=connectors_yaml,
+        saved=error is None,
+        error=error,
+    )
 
 
 @app.get("/logs", response_class=HTMLResponse)
@@ -233,10 +230,7 @@ async def logs_page(request: Request):
     db = await get_db()
     try:
         runs = await db.get_recent_runs(limit=100)
-        return templates.TemplateResponse("logs.html", {
-            "request": request,
-            "runs": runs,
-        })
+        return render(request, "logs.html", runs=runs)
     finally:
         await db.close()
 
@@ -264,10 +258,7 @@ async def connectors_page(request: Request):
         conn["config"] = connectors_config.get(conn["name"], {})
         conn["configured"] = bool(conn["config"])
 
-    return templates.TemplateResponse("connectors.html", {
-        "request": request,
-        "connectors": connector_list,
-    })
+    return render(request, "connectors.html", connectors=connector_list)
 
 
 # --- API: Run agent now ---
