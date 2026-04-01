@@ -1,0 +1,13 @@
+.env
+data/*.db
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/
+credentials/
+node_modules/
+whatsapp-bridge/.wwebjs_auth/
+whatsapp-bridge/.wwebjs_cache/
+.pytest_cache/

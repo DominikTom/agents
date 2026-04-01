@@ -1,0 +1,31 @@
+timezone: Europe/Warsaw
+
+morning_briefing:
+  schedule: "0 7 * * 1-5"          # Mon-Fri at 7:00
+  model: claude-sonnet-4-20250514
+  max_tokens: 4096
+  email_lookback_hours: 13          # 18:00 previous day (13h before 7:00)
+  connectors:
+    - gmail
+    - slack
+    - asana
+    - google_calendar
+    - google_sheets
+    - shoper
+    - shopify
+    - whatsapp
+  outputs:
+    - type: slack
+      channel: "#morning-briefing"
+
+task_monitor:
+  schedule: "0 9,16 * * 1-5"       # Mon-Fri at 9:00 and 16:00
+  model: claude-haiku-4-5-20251001
+  max_tokens: 2048
+  blocked_threshold_days: 3
+  velocity_window_weeks: 4
+  connectors:
+    - asana
+  outputs:
+    - type: slack
+      channel: "#task-monitor"

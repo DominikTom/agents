@@ -1,0 +1,11 @@
+# People registry - maps names across systems
+# Fill in IDs after connecting each service
+
+people:
+  # Example:
+  # karolina:
+  #   display_name: Karolina
+  #   asana_id: "123456789"
+  #   slack_id: "U01ABCDEF"
+  #   whatsapp: "+48..."
+  #   role: team

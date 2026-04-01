@@ -1,0 +1,14 @@
+{
+  "name": "whatsapp-bridge",
+  "version": "1.0.0",
+  "description": "Read-only WhatsApp Web bridge for agents system",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.0",
+    "whatsapp-web.js": "^1.25.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}

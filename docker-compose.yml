@@ -1,0 +1,24 @@
+services:
+  agents:
+    build: .
+    container_name: daily-agents
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data
+      - ./credentials:/app/credentials:ro
+    depends_on:
+      - whatsapp-bridge
+
+  whatsapp-bridge:
+    build: ./whatsapp-bridge
+    container_name: whatsapp-bridge
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - whatsapp-auth:/app/.wwebjs_auth
+
+volumes:
+  whatsapp-auth:

@@ -1,0 +1,53 @@
+gmail:
+  categories:
+    urgent:
+      keywords: ["pilne", "urgent", "ASAP", "termin"]
+      sender_domains: []        # Add domains like: bank.pl, kancelaria.pl
+    to_review:
+      keywords: ["oferta", "propozycja", "współpraca"]
+      sender_domains: []        # Add domains like: agencja.pl
+    skip:
+      keywords: ["newsletter", "potwierdzenie zamówienia", "unsubscribe"]
+
+slack:
+  channels:                     # Channels to monitor
+    - "#general"
+  include_dms: false            # Include direct messages
+
+asana:
+  projects: []                  # Add project IDs to monitor
+
+google_calendar:
+  calendar_ids:
+    - primary
+
+google_sheets:
+  spreadsheets: []              # Add spreadsheet IDs with sheet names
+
+shoper:
+  stores:
+    - name: mybed.pl
+      env_prefix: SHOPER_MYBED
+      metrics:
+        - orders_today
+        - orders_yesterday
+        - revenue_today
+    - name: mittohome.pl
+      env_prefix: SHOPER_MITTO
+      metrics:
+        - orders_today
+        - orders_yesterday
+        - revenue_today
+
+shopify:
+  stores:
+    - name: mybed.de
+      env_prefix: SHOPIFY_MYBED_DE
+      metrics:
+        - orders_today
+        - orders_yesterday
+        - revenue_today
+
+whatsapp:
+  chats: []                     # Chat names or IDs to monitor
+  contacts: []                  # Key contacts to track (e.g., Karolina, Patryk)
