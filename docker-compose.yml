@@ -20,7 +20,7 @@ services:
     ports:
       - "3001:3001"
     volumes:
-      - whatsapp-auth:/app/.wwebjs_auth
+      - whatsapp-auth:/app/auth_info
 
 volumes:
   whatsapp-auth:

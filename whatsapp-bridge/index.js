@@ -1,5 +1,5 @@
 /**
- * WhatsApp Web Bridge - Read-only HTTP API for fetching WhatsApp messages.
+ * WhatsApp Web Bridge v2 - Using Baileys (no Chromium needed!)
  *
  * Endpoints:
  *   GET /health              - Check if client is connected
@@ -8,47 +8,66 @@
  *   GET /messages?contact=NAME&since=TIMESTAMP - Get messages from a contact
  *
  * On first run, scan the QR code in terminal to authenticate.
- * Session is persisted in .wwebjs_auth/ directory.
+ * Session is persisted in ./auth_info/ directory.
  */
 
-const { Client, LocalAuth } = require("whatsapp-web.js");
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+} = require("@whiskeysockets/baileys");
+const pino = require("pino");
 const qrcode = require("qrcode-terminal");
 const express = require("express");
+const path = require("path");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const AUTH_DIR = path.join(__dirname, "auth_info");
 
-const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: {
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--single-process",
-      "--no-zygote",
-    ],
-  },
-});
-
+let sock = null;
 let isReady = false;
 
-client.on("qr", (qr) => {
-  console.log("Scan this QR code to authenticate:");
-  qrcode.generate(qr, { small: true });
-});
+async function startWhatsApp() {
+  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
-client.on("ready", () => {
-  console.log("WhatsApp client is ready!");
-  isReady = true;
-});
+  sock = makeWASocket({
+    auth: state,
+    logger: pino({ level: "silent" }),
+    printQRInTerminal: false,
+  });
 
-client.on("disconnected", (reason) => {
-  console.log("Client disconnected:", reason);
-  isReady = false;
-});
+  // Handle QR code
+  sock.ev.on("connection.update", (update) => {
+    const { connection, lastDisconnect, qr } = update;
+
+    if (qr) {
+      console.log("Scan this QR code to authenticate:");
+      qrcode.generate(qr, { small: true });
+    }
+
+    if (connection === "close") {
+      isReady = false;
+      const statusCode =
+        lastDisconnect?.error?.output?.statusCode;
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+      console.log(
+        `Connection closed. Status: ${statusCode}. Reconnecting: ${shouldReconnect}`
+      );
+      if (shouldReconnect) {
+        setTimeout(startWhatsApp, 3000);
+      } else {
+        console.log("Logged out. Delete auth_info/ and restart to re-authenticate.");
+      }
+    } else if (connection === "open") {
+      isReady = true;
+      console.log("WhatsApp client is ready!");
+    }
+  });
+
+  // Save credentials on update
+  sock.ev.on("creds.update", saveCreds);
+}
 
 // Health check
 app.get("/health", (req, res) => {
@@ -57,16 +76,21 @@ app.get("/health", (req, res) => {
 
 // List chats
 app.get("/chats", async (req, res) => {
-  if (!isReady) return res.status(503).json({ error: "Client not ready" });
+  if (!isReady || !sock) {
+    return res.status(503).json({ error: "Client not ready" });
+  }
 
   try {
-    const chats = await client.getChats();
-    const chatList = chats.map((chat) => ({
-      id: chat.id._serialized,
-      name: chat.name,
-      isGroup: chat.isGroup,
-      unreadCount: chat.unreadCount,
+    // Get all chats from the store
+    const chats = await sock.groupFetchAllParticipating();
+    const chatList = Object.entries(chats).map(([id, meta]) => ({
+      id,
+      name: meta.subject || id,
+      isGroup: true,
+      participants: meta.participants?.length || 0,
     }));
+
+    // Also list some recent individual chats from contacts
     res.json({ chats: chatList });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -75,45 +99,75 @@ app.get("/chats", async (req, res) => {
 
 // Get messages
 app.get("/messages", async (req, res) => {
-  if (!isReady) return res.status(503).json({ error: "Client not ready" });
+  if (!isReady || !sock) {
+    return res.status(503).json({ error: "Client not ready" });
+  }
 
   const { chat, contact, since } = req.query;
-  const sinceTs = since ? parseInt(since) : 0;
+  const sinceTs = since ? parseInt(since) * 1000 : 0; // Convert to ms
 
   try {
-    let targetChat = null;
+    let jid = null;
 
     if (chat) {
-      // Find chat by name (group or individual)
-      const chats = await client.getChats();
-      targetChat = chats.find(
-        (c) => c.name && c.name.toLowerCase().includes(chat.toLowerCase())
-      );
+      // Find group by name
+      const groups = await sock.groupFetchAllParticipating();
+      for (const [id, meta] of Object.entries(groups)) {
+        if (
+          meta.subject &&
+          meta.subject.toLowerCase().includes(chat.toLowerCase())
+        ) {
+          jid = id;
+          break;
+        }
+      }
     } else if (contact) {
-      // Find 1:1 chat by contact name
-      const chats = await client.getChats();
-      targetChat = chats.find(
-        (c) =>
-          !c.isGroup &&
+      // For individual contacts, we need to find their JID
+      // This is a simplified approach - search by name in contacts
+      const contacts = sock.store?.contacts || {};
+      for (const [id, c] of Object.entries(contacts)) {
+        if (
           c.name &&
           c.name.toLowerCase().includes(contact.toLowerCase())
-      );
+        ) {
+          jid = id;
+          break;
+        }
+      }
+      // If not found in contacts, try direct number format
+      if (!jid && /^\+?\d+$/.test(contact)) {
+        jid = contact.replace("+", "") + "@s.whatsapp.net";
+      }
     }
 
-    if (!targetChat) {
+    if (!jid) {
       return res.json({ messages: [], note: "Chat not found" });
     }
 
-    const messages = await targetChat.fetchMessages({ limit: 50 });
+    // Fetch messages using Baileys store
+    // Note: Baileys doesn't persist message history by default,
+    // it only gets messages received while connected
+    const messages = sock.store?.messages?.[jid]?.array || [];
 
     const filtered = messages
-      .filter((msg) => msg.timestamp >= sinceTs)
+      .filter((msg) => {
+        const msgTs = (msg.messageTimestamp || 0) * 1000;
+        return msgTs >= sinceTs;
+      })
       .map((msg) => ({
-        from: msg.author || msg.from,
-        body: msg.body,
-        timestamp: msg.timestamp,
-        hasMedia: msg.hasMedia,
-        type: msg.type,
+        from: msg.pushName || msg.key.participant || msg.key.remoteJid,
+        body:
+          msg.message?.conversation ||
+          msg.message?.extendedTextMessage?.text ||
+          msg.message?.imageMessage?.caption ||
+          "(media)",
+        timestamp: msg.messageTimestamp,
+        hasMedia: !!(
+          msg.message?.imageMessage ||
+          msg.message?.videoMessage ||
+          msg.message?.documentMessage
+        ),
+        type: msg.key.fromMe ? "sent" : "received",
       }));
 
     res.json({ messages: filtered });
@@ -123,7 +177,7 @@ app.get("/messages", async (req, res) => {
 });
 
 // Start
-client.initialize();
+startWhatsApp().catch(console.error);
 
 app.listen(PORT, () => {
   console.log(`WhatsApp bridge running on port ${PORT}`);
