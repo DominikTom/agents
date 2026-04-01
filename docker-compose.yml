@@ -21,6 +21,8 @@ services:
       - "3001:3001"
     volumes:
       - whatsapp-auth:/app/auth_info
+      - whatsapp-data:/app/data
 
 volumes:
   whatsapp-auth:
+  whatsapp-data:
