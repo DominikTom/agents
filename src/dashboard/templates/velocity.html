@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% set active = "velocity" %}
+{% block title %}Velocity{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-bold text-gray-900 mb-6">Velocity — tasków/tydzień per osoba</h2>
+
+{% if persons %}
+<div class="bg-white rounded-xl shadow-sm border p-6 mb-8">
+    <canvas id="velocityChart" height="100"></canvas>
+</div>
+
+<!-- Per-person cards -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    {% for person, records in persons.items() %}
+    <div class="bg-white rounded-xl shadow-sm border p-5">
+        <h3 class="font-semibold text-lg mb-2">{{ person }}</h3>
+        <div class="space-y-2 text-sm">
+            {% for record in records %}
+            <div class="flex justify-between">
+                <span class="text-gray-600">{{ record.week_start }}</span>
+                <div>
+                    <span class="text-green-700 font-medium">{{ record.tasks_closed }} zamkn.</span>
+                    {% if record.tasks_overdue > 0 %}
+                    <span class="text-red-600 ml-2">{{ record.tasks_overdue }} overdue</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="bg-white rounded-xl shadow-sm border p-8 text-center">
+    <p class="text-gray-500 mb-2">Brak danych velocity.</p>
+    <p class="text-sm text-gray-400">Dane pojawią się po kilku uruchomieniach Task Monitor agenta.</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if persons %}
+<script>
+const velocityData = {{ velocity_json | safe }};
+const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4', '#F97316'];
+
+const labels = new Set();
+Object.values(velocityData).forEach(records => {
+    records.forEach(r => labels.add(r.week_start));
+});
+const sortedLabels = [...labels].sort();
+
+const datasets = Object.entries(velocityData).map(([person, records], i) => {
+    const dataMap = {};
+    records.forEach(r => { dataMap[r.week_start] = r.tasks_closed; });
+    return {
+        label: person,
+        data: sortedLabels.map(l => dataMap[l] || 0),
+        borderColor: colors[i % colors.length],
+        backgroundColor: colors[i % colors.length] + '20',
+        tension: 0.3,
+        fill: false,
+    };
+});
+
+new Chart(document.getElementById('velocityChart'), {
+    type: 'line',
+    data: { labels: sortedLabels, datasets },
+    options: {
+        responsive: true,
+        plugins: {
+            legend: { position: 'bottom' },
+            title: { display: true, text: 'Zamknięte taski per tydzień' },
+        },
+        scales: {
+            y: { beginAtZero: true, title: { display: true, text: 'Taski' } },
+        },
+    },
+});
+</script>
+{% endif %}
+{% endblock %}

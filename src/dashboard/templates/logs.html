@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% set active = "logs" %}
+{% block title %}Logi{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-bold text-gray-900 mb-6">Logi uruchomień</h2>
+
+<div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+    {% if runs %}
+    <table class="w-full text-sm">
+        <thead class="bg-gray-50 text-left text-gray-600">
+            <tr>
+                <th class="px-6 py-3">Agent</th>
+                <th class="px-6 py-3">Data</th>
+                <th class="px-6 py-3">Status</th>
+                <th class="px-6 py-3">Czas</th>
+                <th class="px-6 py-3">Błąd</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y">
+            {% for run in runs %}
+            <tr class="hover:bg-gray-50">
+                <td class="px-6 py-3 font-medium">
+                    {% if run.agent_name == 'morning_briefing' %}☀️{% else %}📊{% endif %}
+                    {{ run.agent_name | replace("_", " ") | title }}
+                </td>
+                <td class="px-6 py-3 text-gray-600">{{ run.ran_at }}</td>
+                <td class="px-6 py-3">
+                    <span class="px-2 py-0.5 rounded-full text-xs font-medium
+                        {% if run.status == 'success' %}bg-green-100 text-green-800
+                        {% else %}bg-red-100 text-red-800{% endif %}">
+                        {{ run.status }}
+                    </span>
+                </td>
+                <td class="px-6 py-3 text-gray-600">
+                    {% if run.duration_ms %}{{ run.duration_ms }}ms{% else %}-{% endif %}
+                </td>
+                <td class="px-6 py-3 text-red-600 text-xs max-w-xs truncate">
+                    {{ run.error_message or '-' }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="p-8 text-center text-gray-500">
+        Brak logów. Uruchom agenta żeby zobaczyć pierwsze wpisy.
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

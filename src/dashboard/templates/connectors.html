@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% set active = "connectors" %}
+{% block title %}Connectory{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-bold text-gray-900 mb-6">Connectory</h2>
+
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    {% for conn in connectors %}
+    <div class="bg-white rounded-xl shadow-sm border p-5">
+        <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+                <span class="text-2xl">{{ conn.icon }}</span>
+                <h3 class="font-semibold">{{ conn.label }}</h3>
+            </div>
+            <span class="px-2 py-0.5 rounded-full text-xs font-medium
+                {% if conn.configured %}bg-green-100 text-green-800{% else %}bg-yellow-100 text-yellow-800{% endif %}">
+                {% if conn.configured %}skonfigurowany{% else %}do konfiguracji{% endif %}
+            </span>
+        </div>
+
+        {% if conn.config %}
+        <div class="text-sm text-gray-600 space-y-1">
+            {% if conn.config.channels is defined %}
+            <p><strong>Kanały:</strong> {{ conn.config.channels | join(', ') }}</p>
+            {% endif %}
+            {% if conn.config.projects is defined %}
+            <p><strong>Projekty:</strong> {{ conn.config.projects | length }} skonfigurowanych</p>
+            {% endif %}
+            {% if conn.config.stores is defined %}
+            <p><strong>Sklepy:</strong> {{ conn.config.stores | length }}</p>
+            {% endif %}
+            {% if conn.config.chats is defined %}
+            <p><strong>Czaty:</strong> {{ conn.config.chats | length }}</p>
+            {% endif %}
+            {% if conn.config.calendar_ids is defined %}
+            <p><strong>Kalendarze:</strong> {{ conn.config.calendar_ids | join(', ') }}</p>
+            {% endif %}
+            {% if conn.config.categories is defined %}
+            <p><strong>Kategorie:</strong> urgent, to_review, skip</p>
+            {% endif %}
+        </div>
+        {% else %}
+        <p class="text-sm text-gray-500">
+            Skonfiguruj w <a href="/config" class="text-blue-600 hover:underline">Konfiguracji</a>
+            lub edytuj <code>config/connectors.yaml</code>
+        </p>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+
+<div class="mt-8 bg-blue-50 border border-blue-200 rounded-xl p-5">
+    <h3 class="font-semibold text-blue-900 mb-2">Jak skonfigurować connectory?</h3>
+    <ol class="text-sm text-blue-800 space-y-1 list-decimal list-inside">
+        <li>Dodaj klucze API w pliku <code>.env</code> na serwerze</li>
+        <li>Skonfiguruj szczegóły (kanały, projekty) w <a href="/config" class="underline">Konfiguracji</a></li>
+        <li>Przetestuj: <code>python -m src.main test-connector gmail</code></li>
+    </ol>
+</div>
+{% endblock %}

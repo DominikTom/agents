@@ -59,6 +59,15 @@ class BaseAgent(ABC):
 
             await self.deliver(report)
 
+            # Save report to DB for dashboard
+            await self.db.save_report(
+                agent_name=self.name,
+                summary=report.summary,
+                body=report.body,
+                sources_used=report.sources_used,
+                sources_failed=report.sources_failed,
+            )
+
             duration_ms = int((datetime.now() - start).total_seconds() * 1000)
             await self.db.log_run(self.name, "success", duration_ms=duration_ms)
             logger.info(f"[{self.name}] Completed in {duration_ms}ms")

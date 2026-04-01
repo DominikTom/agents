@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% set active = "reports" %}
+{% block title %}Raporty{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+    <h2 class="text-2xl font-bold text-gray-900">Raporty</h2>
+    <div class="flex gap-2">
+        <a href="/reports" class="px-3 py-1.5 rounded-lg text-sm {% if not agent_filter %}bg-blue-600 text-white{% else %}bg-gray-200 text-gray-700 hover:bg-gray-300{% endif %}">
+            Wszystkie
+        </a>
+        <a href="/reports?agent=morning_briefing" class="px-3 py-1.5 rounded-lg text-sm {% if agent_filter == 'morning_briefing' %}bg-blue-600 text-white{% else %}bg-gray-200 text-gray-700 hover:bg-gray-300{% endif %}">
+            ☀️ Briefing
+        </a>
+        <a href="/reports?agent=task_monitor" class="px-3 py-1.5 rounded-lg text-sm {% if agent_filter == 'task_monitor' %}bg-blue-600 text-white{% else %}bg-gray-200 text-gray-700 hover:bg-gray-300{% endif %}">
+            📊 Monitor
+        </a>
+    </div>
+</div>
+
+{% if reports %}
+<div class="space-y-4">
+    {% for report in reports %}
+    <a href="/reports/{{ report.id }}" class="block bg-white rounded-xl shadow-sm border p-5 hover:shadow-md transition">
+        <div class="flex items-center justify-between mb-2">
+            <span class="font-semibold">
+                {% if report.agent_name == 'morning_briefing' %}☀️ Morning Briefing{% else %}📊 Task Monitor{% endif %}
+            </span>
+            <span class="text-gray-500 text-sm">{{ report.generated_at }}</span>
+        </div>
+        <p class="text-gray-600 text-sm">{{ report.summary[:200] }}</p>
+        {% if report.sources_failed %}
+        <div class="mt-2">
+            <span class="text-xs text-red-600">Niedostępne: {{ report.sources_failed }}</span>
+        </div>
+        {% endif %}
+    </a>
+    {% endfor %}
+</div>
+
+<!-- Pagination -->
+<div class="flex justify-center gap-2 mt-6">
+    {% if current_page > 1 %}
+    <a href="/reports?page={{ current_page - 1 }}{% if agent_filter %}&agent={{ agent_filter }}{% endif %}"
+        class="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 text-sm">← Poprzednia</a>
+    {% endif %}
+    <span class="px-4 py-2 text-gray-600 text-sm">Strona {{ current_page }} z {{ total_pages }}</span>
+    {% if current_page < total_pages %}
+    <a href="/reports?page={{ current_page + 1 }}{% if agent_filter %}&agent={{ agent_filter }}{% endif %}"
+        class="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 text-sm">Następna →</a>
+    {% endif %}
+</div>
+{% else %}
+<div class="bg-white rounded-xl shadow-sm border p-8 text-center">
+    <p class="text-gray-500">Brak raportów do wyświetlenia.</p>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% set active = "reports" %}
+{% block title %}Raport #{{ report.id }}{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+    <a href="/reports" class="text-blue-600 hover:text-blue-800 text-sm">← Powrót do raportów</a>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border p-6">
+    <div class="flex items-center justify-between mb-4 pb-4 border-b">
+        <div>
+            <h2 class="text-xl font-bold">
+                {% if report.agent_name == 'morning_briefing' %}☀️ Morning Briefing{% else %}📊 Task Monitor{% endif %}
+            </h2>
+            <p class="text-gray-500 text-sm mt-1">{{ report.generated_at }}</p>
+        </div>
+        <div class="text-right text-sm">
+            {% if report.sources_used %}
+            <p class="text-green-600">Źródła: {{ report.sources_used }}</p>
+            {% endif %}
+            {% if report.sources_failed %}
+            <p class="text-red-600">Niedostępne: {{ report.sources_failed }}</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="prose max-w-none whitespace-pre-wrap text-gray-800 leading-relaxed">{{ report.body }}</div>
+</div>
+{% endblock %}

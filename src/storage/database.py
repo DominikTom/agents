@@ -45,6 +45,16 @@ CREATE TABLE IF NOT EXISTS velocity_records (
     tasks_overdue INTEGER DEFAULT 0,
     UNIQUE(week_start, person)
 );
+
+CREATE TABLE IF NOT EXISTS reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_name TEXT NOT NULL,
+    generated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    summary TEXT,
+    body TEXT NOT NULL,
+    sources_used TEXT,
+    sources_failed TEXT
+);
 """
 
 
@@ -140,3 +150,80 @@ class Database:
         )
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
+
+    # --- Reports ---
+
+    async def save_report(
+        self,
+        agent_name: str,
+        summary: str,
+        body: str,
+        sources_used: list[str] | None = None,
+        sources_failed: list[str] | None = None,
+    ) -> None:
+        """Save a generated report."""
+        await self.db.execute(
+            "INSERT INTO reports (agent_name, summary, body, sources_used, sources_failed) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                agent_name,
+                summary,
+                body,
+                ",".join(sources_used or []),
+                ",".join(sources_failed or []),
+            ),
+        )
+        await self.db.commit()
+
+    async def get_reports(
+        self, agent_name: str | None = None, limit: int = 20, offset: int = 0
+    ) -> list[dict]:
+        """Get reports with optional filtering by agent."""
+        if agent_name:
+            cursor = await self.db.execute(
+                "SELECT * FROM reports WHERE agent_name = ? ORDER BY generated_at DESC LIMIT ? OFFSET ?",
+                (agent_name, limit, offset),
+            )
+        else:
+            cursor = await self.db.execute(
+                "SELECT * FROM reports ORDER BY generated_at DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    async def get_report(self, report_id: int) -> dict | None:
+        """Get a single report by ID."""
+        cursor = await self.db.execute("SELECT * FROM reports WHERE id = ?", (report_id,))
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def get_reports_count(self, agent_name: str | None = None) -> int:
+        """Get total count of reports."""
+        if agent_name:
+            cursor = await self.db.execute(
+                "SELECT COUNT(*) as cnt FROM reports WHERE agent_name = ?", (agent_name,)
+            )
+        else:
+            cursor = await self.db.execute("SELECT COUNT(*) as cnt FROM reports")
+        row = await cursor.fetchone()
+        return row["cnt"] if row else 0
+
+    # --- Runs (for dashboard) ---
+
+    async def get_recent_runs(self, limit: int = 50) -> list[dict]:
+        """Get recent agent runs for the logs page."""
+        cursor = await self.db.execute(
+            "SELECT * FROM agent_runs ORDER BY ran_at DESC LIMIT ?", (limit,)
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    async def get_last_run(self, agent_name: str) -> dict | None:
+        """Get the most recent run for an agent."""
+        cursor = await self.db.execute(
+            "SELECT * FROM agent_runs WHERE agent_name = ? ORDER BY ran_at DESC LIMIT 1",
+            (agent_name,),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None

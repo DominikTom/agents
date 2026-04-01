@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% set active = "dashboard" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<h2 class="text-2xl font-bold text-gray-900 mb-6">Dashboard</h2>
+
+<!-- Agent Status Cards -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+    <!-- Morning Briefing -->
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <div class="flex items-center justify-between mb-4">
+            <div>
+                <h3 class="text-lg font-semibold">☀️ Morning Briefing</h3>
+                <p class="text-gray-500 text-sm">Codziennie o 7:00 (Pon-Pt)</p>
+            </div>
+            {% if briefing_last %}
+            <span class="px-3 py-1 rounded-full text-xs font-medium
+                {% if briefing_last.status == 'success' %}bg-green-100 text-green-800
+                {% else %}bg-red-100 text-red-800{% endif %}">
+                {{ briefing_last.status }}
+            </span>
+            {% else %}
+            <span class="px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">brak danych</span>
+            {% endif %}
+        </div>
+        {% if briefing_last %}
+        <p class="text-sm text-gray-600 mb-3">
+            Ostatnie uruchomienie: <strong>{{ briefing_last.ran_at }}</strong>
+            {% if briefing_last.duration_ms %}({{ briefing_last.duration_ms }}ms){% endif %}
+        </p>
+        {% endif %}
+        <button onclick="runAgent('briefing')"
+            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm transition">
+            Uruchom teraz
+        </button>
+    </div>
+
+    <!-- Task Monitor -->
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+        <div class="flex items-center justify-between mb-4">
+            <div>
+                <h3 class="text-lg font-semibold">📊 Task Monitor</h3>
+                <p class="text-gray-500 text-sm">2x dziennie: 9:00 i 16:00 (Pon-Pt)</p>
+            </div>
+            {% if monitor_last %}
+            <span class="px-3 py-1 rounded-full text-xs font-medium
+                {% if monitor_last.status == 'success' %}bg-green-100 text-green-800
+                {% else %}bg-red-100 text-red-800{% endif %}">
+                {{ monitor_last.status }}
+            </span>
+            {% else %}
+            <span class="px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">brak danych</span>
+            {% endif %}
+        </div>
+        {% if monitor_last %}
+        <p class="text-sm text-gray-600 mb-3">
+            Ostatnie uruchomienie: <strong>{{ monitor_last.ran_at }}</strong>
+            {% if monitor_last.duration_ms %}({{ monitor_last.duration_ms }}ms){% endif %}
+        </p>
+        {% endif %}
+        <button onclick="runAgent('monitor')"
+            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm transition">
+            Uruchom teraz
+        </button>
+    </div>
+</div>
+
+<!-- Recent Reports -->
+<div class="bg-white rounded-xl shadow-sm border p-6 mb-8">
+    <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold">Ostatnie raporty</h3>
+        <a href="/reports" class="text-blue-600 hover:text-blue-800 text-sm">Zobacz wszystkie →</a>
+    </div>
+    {% if recent_reports %}
+    <div class="space-y-3">
+        {% for report in recent_reports %}
+        <a href="/reports/{{ report.id }}" class="block p-3 rounded-lg hover:bg-gray-50 border transition">
+            <div class="flex items-center justify-between">
+                <div>
+                    <span class="font-medium">
+                        {% if report.agent_name == 'morning_briefing' %}☀️{% else %}📊{% endif %}
+                        {{ report.agent_name | replace("_", " ") | title }}
+                    </span>
+                    <span class="text-gray-500 text-sm ml-2">{{ report.generated_at }}</span>
+                </div>
+            </div>
+            <p class="text-gray-600 text-sm mt-1 truncate">{{ report.summary[:120] }}</p>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-gray-500">Brak raportów. Uruchom agenta żeby wygenerować pierwszy raport.</p>
+    {% endif %}
+</div>
+
+<!-- Recent Runs -->
+<div class="bg-white rounded-xl shadow-sm border p-6">
+    <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold">Ostatnie uruchomienia</h3>
+        <a href="/logs" class="text-blue-600 hover:text-blue-800 text-sm">Pełne logi →</a>
+    </div>
+    {% if recent_runs %}
+    <table class="w-full text-sm">
+        <thead class="text-left text-gray-500 border-b">
+            <tr>
+                <th class="pb-2">Agent</th>
+                <th class="pb-2">Data</th>
+                <th class="pb-2">Status</th>
+                <th class="pb-2">Czas</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y">
+            {% for run in recent_runs %}
+            <tr>
+                <td class="py-2">{{ run.agent_name | replace("_", " ") | title }}</td>
+                <td class="py-2 text-gray-600">{{ run.ran_at }}</td>
+                <td class="py-2">
+                    <span class="px-2 py-0.5 rounded-full text-xs
+                        {% if run.status == 'success' %}bg-green-100 text-green-800
+                        {% else %}bg-red-100 text-red-800{% endif %}">
+                        {{ run.status }}
+                    </span>
+                </td>
+                <td class="py-2 text-gray-600">{% if run.duration_ms %}{{ run.duration_ms }}ms{% else %}-{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-gray-500">Brak danych o uruchomieniach.</p>
+    {% endif %}
+</div>
+{% endblock %}
