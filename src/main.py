@@ -24,16 +24,30 @@ logging.basicConfig(
 logger = logging.getLogger("agents")
 
 
+async def init_system(config: dict) -> tuple:
+    """Initialize database, entity resolver, and seed entities."""
+    from src.storage.database import Database
+    from src.processing.entity_resolver import EntityResolver
+
+    db = Database()
+    await db.init()
+
+    # Seed entities from people.yaml
+    resolver = EntityResolver(db)
+    people_config = config.get("people", {})
+    await resolver.seed_from_config(people_config)
+
+    return db, resolver
+
+
 async def run_agent(agent_name: str, config: dict) -> None:
     """Run a single agent immediately."""
     from src.agents.morning_briefing import MorningBriefingAgent
     from src.agents.task_monitor import TaskMonitorAgent
     from src.ai.client import AIClient
     from src.outputs.slack_output import SlackOutput
-    from src.storage.database import Database
 
-    db = Database()
-    await db.init()
+    db, resolver = await init_system(config)
     ai_client = AIClient()
     slack_output = SlackOutput(config)
 

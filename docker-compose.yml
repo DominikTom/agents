@@ -1,4 +1,22 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agents-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: agents
+      POSTGRES_USER: agents
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agents"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   agents:
     build: .
     container_name: daily-agents
@@ -11,7 +29,10 @@ services:
       - ./data:/app/data
       - ./credentials:/app/credentials:ro
     depends_on:
-      - whatsapp-bridge
+      postgres:
+        condition: service_healthy
+      whatsapp-bridge:
+        condition: service_started
 
   whatsapp-bridge:
     build: ./whatsapp-bridge
@@ -24,5 +45,6 @@ services:
       - whatsapp-data:/app/data
 
 volumes:
+  pgdata:
   whatsapp-auth:
   whatsapp-data:

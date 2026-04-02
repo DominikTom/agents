@@ -26,14 +26,32 @@ app = FastAPI(title="Agents Dashboard")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+# Global database instance - initialized on startup
+_db: Database | None = None
+
+
+@app.on_event("startup")
+async def startup():
+    global _db
+    _db = Database()
+    await _db.init()
+    logger.info("Dashboard database pool initialized")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    global _db
+    if _db:
+        await _db.close()
+
 
 # --- Helpers ---
 
 
 async def get_db() -> Database:
-    db = Database()
-    await db.init()
-    return db
+    if _db is None:
+        raise RuntimeError("Database not initialized")
+    return _db
 
 
 def get_session_token(request: Request) -> str | None:
@@ -86,20 +104,17 @@ async def dashboard_page(request: Request):
         return RedirectResponse(url="/login", status_code=302)
 
     db = await get_db()
-    try:
-        briefing_last = await db.get_last_run("morning_briefing")
-        monitor_last = await db.get_last_run("task_monitor")
-        recent_reports = await db.get_reports(limit=5)
-        recent_runs = await db.get_recent_runs(limit=10)
+    briefing_last = await db.get_last_run("morning_briefing")
+    monitor_last = await db.get_last_run("task_monitor")
+    recent_reports = await db.get_reports(limit=5)
+    recent_runs = await db.get_recent_runs(limit=10)
 
-        return render(request, "dashboard.html",
-            briefing_last=briefing_last,
-            monitor_last=monitor_last,
-            recent_reports=recent_reports,
-            recent_runs=recent_runs,
-        )
-    finally:
-        await db.close()
+    return render(request, "dashboard.html",
+        briefing_last=briefing_last,
+        monitor_last=monitor_last,
+        recent_reports=recent_reports,
+        recent_runs=recent_runs,
+    )
 
 
 @app.get("/reports", response_class=HTMLResponse)
@@ -108,21 +123,18 @@ async def reports_page(request: Request, agent: str | None = None, page: int = 1
         return RedirectResponse(url="/login", status_code=302)
 
     db = await get_db()
-    try:
-        per_page = 10
-        offset = (page - 1) * per_page
-        reports = await db.get_reports(agent_name=agent, limit=per_page, offset=offset)
-        total = await db.get_reports_count(agent_name=agent)
-        total_pages = max(1, (total + per_page - 1) // per_page)
+    per_page = 10
+    offset = (page - 1) * per_page
+    reports = await db.get_reports(agent_name=agent, limit=per_page, offset=offset)
+    total = await db.get_reports_count(agent_name=agent)
+    total_pages = max(1, (total + per_page - 1) // per_page)
 
-        return render(request, "reports.html",
-            reports=reports,
-            current_page=page,
-            total_pages=total_pages,
-            agent_filter=agent,
-        )
-    finally:
-        await db.close()
+    return render(request, "reports.html",
+        reports=reports,
+        current_page=page,
+        total_pages=total_pages,
+        agent_filter=agent,
+    )
 
 
 @app.get("/reports/{report_id}", response_class=HTMLResponse)
@@ -131,14 +143,11 @@ async def report_detail_page(request: Request, report_id: int):
         return RedirectResponse(url="/login", status_code=302)
 
     db = await get_db()
-    try:
-        report = await db.get_report(report_id)
-        if not report:
-            return RedirectResponse(url="/reports", status_code=302)
+    report = await db.get_report(report_id)
+    if not report:
+        return RedirectResponse(url="/reports", status_code=302)
 
-        return render(request, "report_detail.html", report=report)
-    finally:
-        await db.close()
+    return render(request, "report_detail.html", report=report)
 
 
 @app.get("/velocity", response_class=HTMLResponse)
@@ -147,27 +156,23 @@ async def velocity_page(request: Request):
         return RedirectResponse(url="/login", status_code=302)
 
     db = await get_db()
-    try:
-        velocity_data = await db.get_all_velocity(weeks=8)
+    velocity_data = await db.get_all_velocity(weeks=8)
 
-        # Group by person for Chart.js
-        persons: dict[str, list] = {}
-        for record in velocity_data:
-            person = record["person"]
-            if person not in persons:
-                persons[person] = []
-            persons[person].append(record)
+    persons: dict[str, list] = {}
+    for record in velocity_data:
+        person = record["person"]
+        if person not in persons:
+            persons[person] = []
+        persons[person].append(record)
 
-        return render(request, "velocity.html",
-            persons=persons,
-            velocity_json=json.dumps(
-                {p: records for p, records in persons.items()},
-                ensure_ascii=False,
-                default=str,
-            ),
-        )
-    finally:
-        await db.close()
+    return render(request, "velocity.html",
+        persons=persons,
+        velocity_json=json.dumps(
+            {p: records for p, records in persons.items()},
+            ensure_ascii=False,
+            default=str,
+        ),
+    )
 
 
 @app.get("/config", response_class=HTMLResponse)
@@ -228,11 +233,8 @@ async def logs_page(request: Request):
         return RedirectResponse(url="/login", status_code=302)
 
     db = await get_db()
-    try:
-        runs = await db.get_recent_runs(limit=100)
-        return render(request, "logs.html", runs=runs)
-    finally:
-        await db.close()
+    runs = await db.get_recent_runs(limit=100)
+    return render(request, "logs.html", runs=runs)
 
 
 @app.get("/connectors", response_class=HTMLResponse)

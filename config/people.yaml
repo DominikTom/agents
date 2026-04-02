@@ -1,11 +1,46 @@
-# People registry - maps names across systems
-# Fill in IDs after connecting each service
+# People registry - maps names across systems for entity resolution.
+# Fill in real names and IDs for your team.
+#
+# Each person needs:
+#   display_name: Short name used in reports
+#   role: Their role (operations, logistics, sales, etc.)
+#   asana_name: Full name as it appears in Asana
+#   slack_name: Full name as it appears in Slack
+#   whatsapp_name: Name as it appears in WhatsApp
+#   email_patterns: List of email addresses/patterns
 
 people:
-  # Example:
+  # Example - replace with your real team:
+  #
   # karolina:
   #   display_name: Karolina
-  #   asana_id: "123456789"
-  #   slack_id: "U01ABCDEF"
-  #   whatsapp: "+48..."
-  #   role: team
+  #   role: operations
+  #   asana_name: "Karolina Kowalska"
+  #   slack_name: "Karolina Kowalska"
+  #   whatsapp_name: "Karolina"
+  #   email_patterns: ["karolina@mybed.pl"]
+  #
+  # patryk:
+  #   display_name: Patryk
+  #   role: logistics
+  #   asana_name: "Patryk Nowak"
+  #   slack_name: "Patryk Nowak"
+  #   whatsapp_name: "Patryk"
+  #   email_patterns: ["patryk@mybed.pl"]
+  #
+  # maciej:
+  #   display_name: Maciej
+  #   role: development
+  #   asana_name: "Maciej Wiśniewski"
+  #
+  # sandra:
+  #   display_name: Sandra
+  #   role: sales
+  #
+  # luiza:
+  #   display_name: Luiza
+  #   role: marketing
+  #
+  # dorota:
+  #   display_name: Dorota
+  #   role: customer_service

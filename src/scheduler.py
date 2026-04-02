@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -16,42 +15,32 @@ from src.storage.database import Database
 logger = logging.getLogger(__name__)
 
 
-async def run_morning_briefing(config: dict) -> None:
-    """Job function for morning briefing."""
-    from src.agents.morning_briefing import MorningBriefingAgent
-
+async def _init_db_and_run(agent_cls, config: dict) -> None:
+    """Generic job runner: init DB, create agent, run, cleanup."""
     db = Database()
     await db.init()
     try:
         ai_client = AIClient()
         slack_output = SlackOutput(config)
-        agent = MorningBriefingAgent(
+        agent = agent_cls(
             config=config, ai_client=ai_client, outputs=[slack_output], db=db
         )
         await agent.run()
     finally:
         await db.close()
+
+
+async def run_morning_briefing(config: dict) -> None:
+    from src.agents.morning_briefing import MorningBriefingAgent
+    await _init_db_and_run(MorningBriefingAgent, config)
 
 
 async def run_task_monitor(config: dict) -> None:
-    """Job function for task monitor."""
     from src.agents.task_monitor import TaskMonitorAgent
-
-    db = Database()
-    await db.init()
-    try:
-        ai_client = AIClient()
-        slack_output = SlackOutput(config)
-        agent = TaskMonitorAgent(
-            config=config, ai_client=ai_client, outputs=[slack_output], db=db
-        )
-        await agent.run()
-    finally:
-        await db.close()
+    await _init_db_and_run(TaskMonitorAgent, config)
 
 
 def _parse_cron(cron_expr: str) -> dict:
-    """Parse '0 7 * * 1-5' into CronTrigger kwargs."""
     parts = cron_expr.split()
     return {
         "minute": parts[0],
@@ -64,6 +53,11 @@ def _parse_cron(cron_expr: str) -> dict:
 
 async def create_scheduler(config: dict) -> AsyncIOScheduler:
     """Create and configure the scheduler with all agent jobs."""
+    # Seed entities on startup
+    from src.main import init_system
+    db, resolver = await init_system(config)
+    await db.close()
+
     agents_config = config.get("agents", {})
     timezone = agents_config.get("timezone", "Europe/Warsaw")
 
