@@ -193,6 +193,16 @@ CREATE TABLE IF NOT EXISTS business_metrics (
 
 CREATE INDEX IF NOT EXISTS idx_metrics_date ON business_metrics(date);
 CREATE INDEX IF NOT EXISTS idx_metrics_store ON business_metrics(store);
+
+-- WhatsApp chat configuration (enable/disable per chat)
+
+CREATE TABLE IF NOT EXISTS whatsapp_chat_config (
+    jid TEXT PRIMARY KEY,
+    chat_name TEXT NOT NULL,
+    is_group BOOLEAN DEFAULT FALSE,
+    enabled BOOLEAN DEFAULT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
 """
 
 
@@ -628,6 +638,50 @@ class Database:
             metric_date, store, metric_name, metric_value, currency,
             json.dumps(metadata or {}),
         )
+
+    # =========================================================================
+    # WhatsApp Chat Config
+    # =========================================================================
+
+    async def upsert_whatsapp_chat(self, jid: str, chat_name: str, is_group: bool) -> None:
+        """Register a chat from the bridge. Does not overwrite enabled status."""
+        await self._execute(
+            "INSERT INTO whatsapp_chat_config (jid, chat_name, is_group) "
+            "VALUES ($1, $2, $3) "
+            "ON CONFLICT (jid) DO UPDATE SET chat_name = EXCLUDED.chat_name, is_group = EXCLUDED.is_group",
+            jid, chat_name, is_group,
+        )
+
+    async def set_whatsapp_chat_enabled(self, jid: str, enabled: bool | None) -> None:
+        await self._execute(
+            "UPDATE whatsapp_chat_config SET enabled = $2, updated_at = NOW() WHERE jid = $1",
+            jid, enabled,
+        )
+
+    async def get_whatsapp_chat_configs(self) -> list[dict]:
+        """Get all chats with their enabled status, merged with message stats."""
+        return await self._fetchall(
+            "SELECT c.jid, c.chat_name, c.is_group, c.enabled, "
+            "COALESCE(s.total_messages, 0) as total_messages, "
+            "COALESCE(s.today, 0) as today, "
+            "s.last_message_at "
+            "FROM whatsapp_chat_config c "
+            "LEFT JOIN ("
+            "  SELECT metadata->>'chat_jid' as jid, "
+            "  COUNT(*) as total_messages, "
+            "  COUNT(*) FILTER (WHERE timestamp >= NOW() - INTERVAL '1 day') as today, "
+            "  MAX(timestamp) as last_message_at "
+            "  FROM events WHERE source = 'whatsapp' GROUP BY metadata->>'chat_jid'"
+            ") s ON c.jid = s.jid "
+            "ORDER BY s.last_message_at DESC NULLS LAST, c.chat_name"
+        )
+
+    async def get_disabled_chat_jids(self) -> set[str]:
+        """Get JIDs of explicitly disabled chats."""
+        rows = await self._fetchall(
+            "SELECT jid FROM whatsapp_chat_config WHERE enabled = FALSE"
+        )
+        return {r["jid"] for r in rows}
 
     # =========================================================================
     # Knowledge Base: WhatsApp Monitor

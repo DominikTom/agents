@@ -244,7 +244,7 @@ async def whatsapp_page(request: Request):
 
     db = await get_db()
     messages = await db.get_recent_whatsapp_messages(limit=50)
-    chat_stats = await db.get_whatsapp_chat_stats()
+    chat_configs = await db.get_whatsapp_chat_configs()
     unmapped = await db.get_unmapped_whatsapp_senders()
     sync_status = await db.get_whatsapp_sync_status()
 
@@ -253,12 +253,30 @@ async def whatsapp_page(request: Request):
         if isinstance(msg.get("metadata"), str):
             msg["metadata"] = json.loads(msg["metadata"])
 
+    # Split chats by status
+    enabled_chats = [c for c in chat_configs if c["enabled"] is True]
+    new_chats = [c for c in chat_configs if c["enabled"] is None and c["total_messages"] > 0]
+    disabled_chats = [c for c in chat_configs if c["enabled"] is False]
+
     return render(request, "whatsapp.html",
         messages=messages,
-        chat_stats=chat_stats,
+        enabled_chats=enabled_chats,
+        new_chats=new_chats,
+        disabled_chats=disabled_chats,
         unmapped=unmapped,
         sync_status=sync_status,
     )
+
+
+@app.post("/api/whatsapp/chat/toggle")
+async def toggle_whatsapp_chat(request: Request, jid: str = Form(...), enabled: str = Form(...)):
+    if not require_auth(request):
+        return {"error": "unauthorized"}
+
+    db = await get_db()
+    enabled_val = True if enabled == "true" else False
+    await db.set_whatsapp_chat_enabled(jid, enabled_val)
+    return RedirectResponse(url="/whatsapp", status_code=302)
 
 
 @app.get("/connectors", response_class=HTMLResponse)

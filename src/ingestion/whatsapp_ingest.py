@@ -33,6 +33,15 @@ class WhatsAppIngestor:
                 resp.raise_for_status()
                 chats = resp.json().get("chats", [])
 
+                # Register all chats in DB (so they appear in UI)
+                for chat in chats:
+                    await self.db.upsert_whatsapp_chat(
+                        chat["id"], chat["name"], chat.get("isGroup", False)
+                    )
+
+                # Get disabled chats to skip
+                disabled_jids = await self.db.get_disabled_chat_jids()
+
                 for chat in chats:
                     if chat.get("messageCount", 0) == 0:
                         continue
@@ -40,6 +49,10 @@ class WhatsAppIngestor:
                     chat_name = chat["name"]
                     jid = chat["id"]
                     is_group = chat.get("isGroup", False)
+
+                    # Skip disabled chats
+                    if jid in disabled_jids:
+                        continue
 
                     try:
                         new = await self._sync_chat(
