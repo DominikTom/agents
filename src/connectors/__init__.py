@@ -11,6 +11,7 @@ def create_connector(name: str, config: dict) -> BaseConnector | None:
     from src.connectors.gmail import GmailConnector
     from src.connectors.google_calendar import GoogleCalendarConnector
     from src.connectors.google_sheets import GoogleSheetsConnector
+    from src.connectors.ideaerp import IdeaERPConnector
     from src.connectors.shoper import ShoperConnector
     from src.connectors.shopify import ShopifyConnector
     from src.connectors.slack_reader import SlackReaderConnector
@@ -24,6 +25,7 @@ def create_connector(name: str, config: dict) -> BaseConnector | None:
         "google_sheets": GoogleSheetsConnector,
         "shoper": ShoperConnector,
         "shopify": ShopifyConnector,
+        "ideaerp": IdeaERPConnector,
         "whatsapp": WhatsAppConnector,
     }
 

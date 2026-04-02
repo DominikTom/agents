@@ -24,6 +24,18 @@ google_calendar:
 google_sheets:
   spreadsheets: []              # Add spreadsheet IDs with sheet names
 
+ideaerp:
+  base_url: https://api.delta.ideaerp.pl
+  env_prefix: IDEAERP
+  metrics:
+    - orders_today
+    - orders_yesterday
+    - revenue_today
+    - revenue_yesterday
+    - status_breakdown
+    - avg_order_value
+
+# Legacy connectors (replaced by ideaerp) - kept for backwards compatibility
 shoper:
   stores:
     - name: mybed.pl

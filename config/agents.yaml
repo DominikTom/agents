@@ -11,8 +11,7 @@ morning_briefing:
     - asana
     - google_calendar
     - google_sheets
-    - shoper
-    - shopify
+    - ideaerp
     - whatsapp
   outputs:
     - type: slack
