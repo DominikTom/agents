@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -63,15 +64,6 @@ class IdeaERPConnector(BaseConnector):
         resp.raise_for_status()
         return resp.json().get("shops", [])
 
-    @staticmethod
-    def _get_utc_offset_hours() -> int:
-        """Get current UTC offset for Europe/Warsaw (CET=+1, CEST=+2)."""
-        # Use system local time to detect DST
-        now = datetime.now()
-        utc_now = datetime.now(timezone.utc).replace(tzinfo=None)
-        offset_seconds = (now - utc_now).total_seconds()
-        return round(offset_seconds / 3600)
-
     async def _fetch_store_orders(
         self,
         client: httpx.AsyncClient,
@@ -82,15 +74,15 @@ class IdeaERPConnector(BaseConnector):
         store_mapping: list[dict],
     ) -> list[dict]:
         # IdeaERP API stores dates in UTC, but business days are in Europe/Warsaw
-        utc_offset = self._get_utc_offset_hours()
-        now = datetime.now()
-        today_start_local = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        yesterday_start_local = today_start_local - timedelta(days=1)
+        warsaw = ZoneInfo("Europe/Warsaw")
+        now_warsaw = datetime.now(warsaw)
+        today_start_warsaw = now_warsaw.replace(hour=0, minute=0, second=0, microsecond=0)
+        yesterday_start_warsaw = today_start_warsaw - timedelta(days=1)
 
-        # Convert local midnight boundaries to UTC for API queries
-        today_start_utc = today_start_local - timedelta(hours=utc_offset)
-        yesterday_start_utc = yesterday_start_local - timedelta(hours=utc_offset)
-        now_utc = now - timedelta(hours=utc_offset)
+        # Convert Warsaw midnight boundaries to UTC for API queries
+        today_start_utc = today_start_warsaw.astimezone(timezone.utc)
+        yesterday_start_utc = yesterday_start_warsaw.astimezone(timezone.utc)
+        now_utc = now_warsaw.astimezone(timezone.utc)
 
         items = []
 
