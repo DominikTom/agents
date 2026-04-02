@@ -174,6 +174,7 @@ class IdeaERPConnector(BaseConnector):
                 float(line.get("order_line_gross", 0) or 0)
                 for line in (order.get("order_lines") or [])
             )
+            order_total += float(order.get("delivery_price", 0) or 0)
             revenue += order_total
 
             if order.get("is_paid"):
