@@ -27,6 +27,15 @@ google_sheets:
 ideaerp:
   base_url: https://api.delta.ideaerp.pl
   env_prefix: IDEAERP
+  store_mapping:
+    - shop_name: "Delta Industries"
+      currency: PLN
+      display_name: mybed.pl
+    - shop_name: "Delta Industries"
+      currency: EUR
+      display_name: mybed.de
+    - shop_name: "All Good Things"
+      display_name: mittohome.pl
   metrics:
     - orders_today
     - orders_yesterday
