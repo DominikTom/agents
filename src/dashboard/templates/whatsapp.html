@@ -48,7 +48,7 @@
                     <div class="min-w-0 flex-1">
                         <p class="text-sm text-gray-900 truncate">
                             {% if chat.is_group %}👥{% else %}💬{% endif %}
-                            {{ chat.chat_name }}
+                            {{ chat.contact_name or chat.chat_name }}
                         </p>
                     </div>
                     <div class="flex items-center gap-2">
@@ -81,7 +81,7 @@
                     <div class="min-w-0 flex-1">
                         <p class="text-sm text-gray-900 truncate">
                             {% if chat.is_group %}👥{% else %}💬{% endif %}
-                            {{ chat.chat_name }}
+                            {{ chat.contact_name or chat.chat_name }}
                         </p>
                         <p class="text-xs text-gray-400">{{ chat.total_messages }} msg{% if chat.today > 0 %} | +{{ chat.today }} dziś{% endif %}</p>
                     </div>
@@ -115,7 +115,7 @@
                 <div class="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-50 group">
                     <p class="text-sm text-gray-400 truncate flex-1">
                         {% if chat.is_group %}👥{% else %}💬{% endif %}
-                        {{ chat.chat_name }}
+                        {{ chat.contact_name or chat.chat_name }}
                     </p>
                     <form method="POST" action="/api/whatsapp/chat/toggle" class="opacity-0 group-hover:opacity-100">
                         <input type="hidden" name="jid" value="{{ chat.jid }}">

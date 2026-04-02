@@ -119,7 +119,12 @@ class EntityResolver:
 
             for source, alias in source_mappings.items():
                 if alias:
-                    await self.db.upsert_alias(entity_id, source, alias)
+                    # Support list of aliases (e.g. whatsapp_name: ["Maciej", "Maciek Żydziak"])
+                    if isinstance(alias, list):
+                        for a in alias:
+                            await self.db.upsert_alias(entity_id, source, a)
+                    else:
+                        await self.db.upsert_alias(entity_id, source, alias)
 
             # Email patterns as gmail aliases
             for pattern in person.get("email_patterns", []):
