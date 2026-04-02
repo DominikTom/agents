@@ -629,6 +629,61 @@ class Database:
             json.dumps(metadata or {}),
         )
 
+    # =========================================================================
+    # Knowledge Base: WhatsApp Monitor
+    # =========================================================================
+
+    async def get_recent_whatsapp_messages(self, limit: int = 50) -> list[dict]:
+        """Get most recent WhatsApp messages for dashboard."""
+        return await self._fetchall(
+            "SELECT e.id, e.timestamp, e.title as chat_name, e.body, "
+            "e.category as chat_type, e.metadata, "
+            "ent.display_name as sender_name "
+            "FROM events e "
+            "LEFT JOIN entities ent ON e.sender_entity_id = ent.id "
+            "WHERE e.source = 'whatsapp' "
+            "ORDER BY e.timestamp DESC LIMIT $1",
+            limit,
+        )
+
+    async def get_whatsapp_chat_stats(self) -> list[dict]:
+        """Get message counts per chat for WhatsApp."""
+        return await self._fetchall(
+            "SELECT title as chat_name, category as chat_type, "
+            "COUNT(*) as total_messages, "
+            "COUNT(*) FILTER (WHERE timestamp >= NOW() - INTERVAL '1 day') as today, "
+            "COUNT(*) FILTER (WHERE timestamp >= NOW() - INTERVAL '7 days') as this_week, "
+            "MAX(timestamp) as last_message_at "
+            "FROM events WHERE source = 'whatsapp' "
+            "GROUP BY title, category "
+            "ORDER BY last_message_at DESC"
+        )
+
+    async def get_unmapped_whatsapp_senders(self) -> list[dict]:
+        """Get WhatsApp sender names that are not mapped to entities."""
+        return await self._fetchall(
+            "SELECT DISTINCT metadata->>'sender_name' as sender_name, "
+            "COUNT(*) as message_count, "
+            "MAX(timestamp) as last_seen "
+            "FROM events "
+            "WHERE source = 'whatsapp' AND sender_entity_id IS NULL "
+            "AND metadata->>'sender_name' IS NOT NULL "
+            "AND metadata->>'sender_name' != '' "
+            "AND (metadata->>'from_me')::boolean IS NOT TRUE "
+            "GROUP BY metadata->>'sender_name' "
+            "ORDER BY message_count DESC"
+        )
+
+    async def get_whatsapp_sync_status(self) -> dict:
+        """Get WhatsApp sync status for dashboard."""
+        row = await self._fetchone(
+            "SELECT COUNT(*) as total, "
+            "MAX(ingested_at) as last_sync, "
+            "COUNT(*) FILTER (WHERE ingested_at >= NOW() - INTERVAL '5 minutes') as recent "
+            "FROM events WHERE source = 'whatsapp'"
+        )
+        return dict(row) if row else {"total": 0, "last_sync": None, "recent": 0}
+
     async def get_metrics(
         self, store: str | None = None, since: date | None = None, until: date | None = None,
     ) -> list[dict]:

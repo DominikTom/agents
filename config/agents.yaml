@@ -17,6 +17,9 @@ morning_briefing:
     - type: slack
       channel: "#morning-briefing"
 
+whatsapp_sync:
+  schedule: "*/5 * * * *"          # Every 5 minutes
+
 task_monitor:
   schedule: "0 9,16 * * 1-5"       # Mon-Fri at 9:00 and 16:00
   model: claude-haiku-4-5-20251001

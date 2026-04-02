@@ -237,6 +237,30 @@ async def logs_page(request: Request):
     return render(request, "logs.html", runs=runs)
 
 
+@app.get("/whatsapp", response_class=HTMLResponse)
+async def whatsapp_page(request: Request):
+    if not require_auth(request):
+        return RedirectResponse(url="/login", status_code=302)
+
+    db = await get_db()
+    messages = await db.get_recent_whatsapp_messages(limit=50)
+    chat_stats = await db.get_whatsapp_chat_stats()
+    unmapped = await db.get_unmapped_whatsapp_senders()
+    sync_status = await db.get_whatsapp_sync_status()
+
+    # Parse metadata JSON strings to dicts for template access
+    for msg in messages:
+        if isinstance(msg.get("metadata"), str):
+            msg["metadata"] = json.loads(msg["metadata"])
+
+    return render(request, "whatsapp.html",
+        messages=messages,
+        chat_stats=chat_stats,
+        unmapped=unmapped,
+        sync_status=sync_status,
+    )
+
+
 @app.get("/connectors", response_class=HTMLResponse)
 async def connectors_page(request: Request):
     if not require_auth(request):
@@ -251,8 +275,9 @@ async def connectors_page(request: Request):
         {"name": "asana", "label": "Asana", "icon": "📋"},
         {"name": "google_calendar", "label": "Google Calendar", "icon": "📅"},
         {"name": "google_sheets", "label": "Google Sheets", "icon": "📊"},
-        {"name": "shoper", "label": "Shoper", "icon": "🛒"},
-        {"name": "shopify", "label": "Shopify", "icon": "🛍️"},
+        {"name": "ideaerp", "label": "IdeaERP", "icon": "🏭"},
+        {"name": "shoper", "label": "Shoper (legacy)", "icon": "🛒"},
+        {"name": "shopify", "label": "Shopify (legacy)", "icon": "🛍️"},
         {"name": "whatsapp", "label": "WhatsApp", "icon": "📱"},
     ]
 

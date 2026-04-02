@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% set active = "whatsapp" %}
+{% block title %}WhatsApp Monitor{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+    <h2 class="text-2xl font-bold text-gray-900">WhatsApp Monitor</h2>
+    <div class="text-sm text-gray-500">
+        {% if sync_status.last_sync %}
+            Ostatni sync: {{ sync_status.last_sync.strftime('%H:%M:%S') }} |
+        {% endif %}
+        Wiadomości w bazie: <span class="font-semibold">{{ sync_status.total }}</span>
+        {% if sync_status.recent > 0 %}
+            | <span class="text-green-600">+{{ sync_status.recent }} (ostatnie 5 min)</span>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Unmapped senders alert -->
+{% if unmapped %}
+<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+    <h3 class="text-sm font-semibold text-yellow-800 mb-2">Niezmapowani nadawcy ({{ unmapped|length }})</h3>
+    <p class="text-xs text-yellow-600 mb-2">Dodaj mapowania w config/people.yaml (whatsapp_name)</p>
+    <div class="flex flex-wrap gap-2">
+        {% for u in unmapped[:15] %}
+        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-yellow-100 text-yellow-800">
+            {{ u.sender_name }} <span class="ml-1 text-yellow-500">({{ u.message_count }})</span>
+        </span>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Chat stats -->
+    <div class="lg:col-span-1">
+        <div class="bg-white rounded-lg shadow p-4">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">Czaty</h3>
+            {% if chat_stats %}
+            <div class="space-y-2 max-h-[600px] overflow-y-auto">
+                {% for chat in chat_stats %}
+                <div class="flex items-center justify-between py-2 px-2 rounded hover:bg-gray-50">
+                    <div class="min-w-0 flex-1">
+                        <p class="text-sm font-medium text-gray-900 truncate">
+                            {% if chat.chat_type == 'group' %}👥{% else %}💬{% endif %}
+                            {{ chat.chat_name }}
+                        </p>
+                        <p class="text-xs text-gray-500">
+                            {% if chat.last_message_at %}
+                                {{ chat.last_message_at.strftime('%d.%m %H:%M') }}
+                            {% endif %}
+                        </p>
+                    </div>
+                    <div class="text-right ml-2">
+                        <span class="text-sm font-semibold text-gray-900">{{ chat.total_messages }}</span>
+                        {% if chat.today > 0 %}
+                        <span class="text-xs text-green-600 block">+{{ chat.today }} dziś</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-sm text-gray-500">Brak danych - sync jeszcze nie wystartował</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Recent messages -->
+    <div class="lg:col-span-2">
+        <div class="bg-white rounded-lg shadow p-4">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">Ostatnie wiadomości</h3>
+            {% if messages %}
+            <div class="space-y-3 max-h-[600px] overflow-y-auto">
+                {% for msg in messages %}
+                <div class="border-b border-gray-100 pb-3 last:border-0">
+                    <div class="flex items-center justify-between mb-1">
+                        <div class="flex items-center gap-2">
+                            {% if msg.chat_type == 'group' %}
+                            <span class="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">{{ msg.chat_name }}</span>
+                            {% else %}
+                            <span class="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">{{ msg.chat_name }}</span>
+                            {% endif %}
+                            <span class="text-sm font-medium text-gray-900">
+                                {% set meta = msg.metadata if msg.metadata is mapping else {} %}
+                                {% if msg.sender_name %}
+                                    {{ msg.sender_name }}
+                                {% elif meta.get('from_me', False) %}
+                                    Ty
+                                {% elif meta.get('sender_name') %}
+                                    <span class="text-yellow-600">{{ meta.get('sender_name') }}</span>
+                                {% else %}
+                                    Nieznany
+                                {% endif %}
+                            </span>
+                        </div>
+                        <span class="text-xs text-gray-400">{{ msg.timestamp.strftime('%d.%m %H:%M') }}</span>
+                    </div>
+                    <p class="text-sm text-gray-700 break-words">{{ msg.body[:300] }}{% if msg.body|length > 300 %}...{% endif %}</p>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-sm text-gray-500">Brak wiadomości w bazie. Sync startuje co 5 minut.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -8,7 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from src.ai.client import AIClient
-from src.common.config import load_config
+from src.common.config import load_config, get_env
 from src.outputs.slack_output import SlackOutput
 from src.storage.database import Database
 
@@ -38,6 +38,22 @@ async def run_morning_briefing(config: dict) -> None:
 async def run_task_monitor(config: dict) -> None:
     from src.agents.task_monitor import TaskMonitorAgent
     await _init_db_and_run(TaskMonitorAgent, config)
+
+
+async def run_whatsapp_sync(config: dict) -> None:
+    """Sync WhatsApp messages from bridge to PostgreSQL."""
+    from src.ingestion.whatsapp_ingest import WhatsAppIngestor
+
+    db = Database()
+    await db.init()
+    try:
+        bridge_url = get_env("WHATSAPP_BRIDGE_URL")
+        ingestor = WhatsAppIngestor(db, bridge_url)
+        await ingestor.sync()
+    except Exception as e:
+        logger.error(f"WhatsApp sync failed: {e}")
+    finally:
+        await db.close()
 
 
 def _parse_cron(cron_expr: str) -> dict:
@@ -88,5 +104,18 @@ async def create_scheduler(config: dict) -> AsyncIOScheduler:
         replace_existing=True,
     )
     logger.info(f"Scheduled task_monitor: {monitor_cron} ({timezone})")
+
+    # WhatsApp Sync
+    wa_config = agents_config.get("whatsapp_sync", {})
+    wa_cron = wa_config.get("schedule", "*/5 * * * *")
+    scheduler.add_job(
+        run_whatsapp_sync,
+        trigger=CronTrigger(**_parse_cron(wa_cron), timezone=timezone),
+        args=[config],
+        id="whatsapp_sync",
+        name="WhatsApp Sync",
+        replace_existing=True,
+    )
+    logger.info(f"Scheduled whatsapp_sync: {wa_cron} ({timezone})")
 
     return scheduler
