@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -63,6 +63,15 @@ class IdeaERPConnector(BaseConnector):
         resp.raise_for_status()
         return resp.json().get("shops", [])
 
+    @staticmethod
+    def _get_utc_offset_hours() -> int:
+        """Get current UTC offset for Europe/Warsaw (CET=+1, CEST=+2)."""
+        # Use system local time to detect DST
+        now = datetime.now()
+        utc_now = datetime.now(timezone.utc).replace(tzinfo=None)
+        offset_seconds = (now - utc_now).total_seconds()
+        return round(offset_seconds / 3600)
+
     async def _fetch_store_orders(
         self,
         client: httpx.AsyncClient,
@@ -72,15 +81,22 @@ class IdeaERPConnector(BaseConnector):
         shop_name: str,
         store_mapping: list[dict],
     ) -> list[dict]:
+        # IdeaERP API stores dates in UTC, but business days are in Europe/Warsaw
+        utc_offset = self._get_utc_offset_hours()
         now = datetime.now()
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        yesterday_start = today_start - timedelta(days=1)
+        today_start_local = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        yesterday_start_local = today_start_local - timedelta(days=1)
+
+        # Convert local midnight boundaries to UTC for API queries
+        today_start_utc = today_start_local - timedelta(hours=utc_offset)
+        yesterday_start_utc = yesterday_start_local - timedelta(hours=utc_offset)
+        now_utc = now - timedelta(hours=utc_offset)
 
         items = []
 
         for label, date_from, date_to in [
-            ("today", today_start, now),
-            ("yesterday", yesterday_start, today_start),
+            ("today", today_start_utc, now_utc),
+            ("yesterday", yesterday_start_utc, today_start_utc),
         ]:
             orders = await self._fetch_orders_paginated(
                 client,
