@@ -56,6 +56,66 @@ async def run_whatsapp_sync(config: dict) -> None:
         await db.close()
 
 
+async def run_gmail_sync(config: dict) -> None:
+    """Sync Gmail emails to PostgreSQL events table."""
+    from src.ingestion.gmail_ingest import GmailIngestor
+
+    db = Database()
+    await db.init()
+    try:
+        ingestor = GmailIngestor(db)
+        await ingestor.sync(lookback_hours=1)
+    except Exception as e:
+        logger.error(f"Gmail sync failed: {e}")
+    finally:
+        await db.close()
+
+
+async def run_calendar_sync(config: dict) -> None:
+    """Sync Google Calendar events to PostgreSQL events table."""
+    from src.ingestion.calendar_ingest import CalendarIngestor
+
+    db = Database()
+    await db.init()
+    try:
+        ingestor = CalendarIngestor(db, config)
+        await ingestor.sync(days_ahead=2)
+    except Exception as e:
+        logger.error(f"Calendar sync failed: {e}")
+    finally:
+        await db.close()
+
+
+async def run_asana_sync(config: dict) -> None:
+    """Sync Asana tasks to PostgreSQL events table."""
+    from src.ingestion.asana_ingest import AsanaIngestor
+
+    db = Database()
+    await db.init()
+    try:
+        ingestor = AsanaIngestor(db, config)
+        await ingestor.sync()
+    except Exception as e:
+        logger.error(f"Asana sync failed: {e}")
+    finally:
+        await db.close()
+
+
+async def run_ideaerp_metrics(config: dict) -> None:
+    """Sync IdeaERP order metrics to business_metrics table."""
+    from src.ingestion.ideaerp_ingest import IdeaERPMetricsIngestor
+
+    db = Database()
+    await db.init()
+    try:
+        ingestor = IdeaERPMetricsIngestor(db, config)
+        await ingestor.sync()
+    except Exception as e:
+        logger.error(f"IdeaERP metrics sync failed: {e}")
+    finally:
+        await db.close()
+
+
 def _parse_cron(cron_expr: str) -> dict:
     parts = cron_expr.split()
     return {
@@ -105,7 +165,7 @@ async def create_scheduler(config: dict) -> AsyncIOScheduler:
     )
     logger.info(f"Scheduled task_monitor: {monitor_cron} ({timezone})")
 
-    # WhatsApp Sync
+    # WhatsApp Sync - every 5 minutes
     wa_config = agents_config.get("whatsapp_sync", {})
     wa_cron = wa_config.get("schedule", "*/5 * * * *")
     scheduler.add_job(
@@ -117,5 +177,57 @@ async def create_scheduler(config: dict) -> AsyncIOScheduler:
         replace_existing=True,
     )
     logger.info(f"Scheduled whatsapp_sync: {wa_cron} ({timezone})")
+
+    # Gmail Sync - every 15 minutes
+    gmail_config = agents_config.get("gmail_sync", {})
+    gmail_cron = gmail_config.get("schedule", "*/15 * * * *")
+    scheduler.add_job(
+        run_gmail_sync,
+        trigger=CronTrigger(**_parse_cron(gmail_cron), timezone=timezone),
+        args=[config],
+        id="gmail_sync",
+        name="Gmail Sync",
+        replace_existing=True,
+    )
+    logger.info(f"Scheduled gmail_sync: {gmail_cron} ({timezone})")
+
+    # Calendar Sync - every 30 minutes
+    cal_config = agents_config.get("calendar_sync", {})
+    cal_cron = cal_config.get("schedule", "*/30 * * * *")
+    scheduler.add_job(
+        run_calendar_sync,
+        trigger=CronTrigger(**_parse_cron(cal_cron), timezone=timezone),
+        args=[config],
+        id="calendar_sync",
+        name="Calendar Sync",
+        replace_existing=True,
+    )
+    logger.info(f"Scheduled calendar_sync: {cal_cron} ({timezone})")
+
+    # Asana Sync - every 15 minutes
+    asana_config = agents_config.get("asana_sync", {})
+    asana_cron = asana_config.get("schedule", "*/15 * * * *")
+    scheduler.add_job(
+        run_asana_sync,
+        trigger=CronTrigger(**_parse_cron(asana_cron), timezone=timezone),
+        args=[config],
+        id="asana_sync",
+        name="Asana Sync",
+        replace_existing=True,
+    )
+    logger.info(f"Scheduled asana_sync: {asana_cron} ({timezone})")
+
+    # IdeaERP Metrics - every hour
+    erp_config = agents_config.get("ideaerp_metrics", {})
+    erp_cron = erp_config.get("schedule", "0 * * * *")
+    scheduler.add_job(
+        run_ideaerp_metrics,
+        trigger=CronTrigger(**_parse_cron(erp_cron), timezone=timezone),
+        args=[config],
+        id="ideaerp_metrics",
+        name="IdeaERP Metrics",
+        replace_existing=True,
+    )
+    logger.info(f"Scheduled ideaerp_metrics: {erp_cron} ({timezone})")
 
     return scheduler

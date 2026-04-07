@@ -8,6 +8,10 @@ people:
     role: ceo
     whatsapp_name:
       - "Dominik"
+    asana_name: "Dominik Tomaszczyk"
+    email_patterns:
+      - "dominik.tomaszczyk@mybed.pl"
+      - "dominik@mybed.pl"
 
   maciej:
     display_name: Maciej Żydziak
@@ -16,6 +20,9 @@ people:
     whatsapp_name:
       - "Maciej"
       - "Maciek Żydziak"
+    asana_name: "Maciej Żydziak"
+    email_patterns:
+      - "maciej@mybed.pl"
 
   # === Sprzedaż / Operacje ===
   sandra:
@@ -24,6 +31,9 @@ people:
     role: key_account
     whatsapp_name:
       - "Sandra"
+    asana_name: "Sandra Nowak"
+    email_patterns:
+      - "sandra@mybed.pl"
 
   # === Marketing / Produkty ===
   karolina:
@@ -32,6 +42,9 @@ people:
     role: creative_director
     whatsapp_name:
       - "Karolina"
+    asana_name: "Karolina Kasińska Kowalczyk"
+    email_patterns:
+      - "karolina@mybed.pl"
 
   patryk_szczepanski:
     display_name: Patryk Szczepański
@@ -39,6 +52,9 @@ people:
     role: marketing_manager
     whatsapp_name:
       - "Patryk Szczepański"
+    asana_name: "Patryk Szczepański"
+    email_patterns:
+      - "patryk@mybed.pl"
 
   kasia:
     display_name: Katarzyna Kornek
@@ -46,6 +62,9 @@ people:
     role: content_creator
     whatsapp_name:
       - "Kasia"
+    asana_name: "Katarzyna Kornek"
+    email_patterns:
+      - "kasia@mybed.pl"
 
   agata:
     display_name: Agata Sawicka
@@ -53,6 +72,7 @@ people:
     role: graphic_designer
     whatsapp_name:
       - "Agata"
+    asana_name: "Agata Sawicka"
 
   rafal:
     display_name: Rafał Jodłowski
@@ -60,6 +80,7 @@ people:
     role: 3d_visualizations
     whatsapp_name:
       - "Rafał"
+    asana_name: "Rafał Jodłowski"
 
   # === IT ===
   kordian:
@@ -68,6 +89,9 @@ people:
     role: project_manager_it
     whatsapp_name:
       - "Kordian"
+    asana_name: "Kordian Kaczmarczyk"
+    email_patterns:
+      - "kordian@mybed.pl"
 
   marcin:
     display_name: Marcin Wijata
@@ -75,6 +99,7 @@ people:
     role: developer
     whatsapp_name:
       - "Marcin"
+    asana_name: "Marcin Wijata"
 
   szymon:
     display_name: Szymon Kaliczak
@@ -82,6 +107,7 @@ people:
     role: frontend_developer
     whatsapp_name:
       - "Szymon"
+    asana_name: "Szymon Kaliczak"
 
   krzysztof:
     display_name: Krzysztof Brelik
@@ -89,6 +115,7 @@ people:
     role: frontend_developer
     whatsapp_name:
       - "Krzysztof"
+    asana_name: "Krzysztof Brelik"
 
   luiza:
     display_name: Luiza Hryckiewicz
@@ -96,6 +123,7 @@ people:
     role: ux_ui_designer
     whatsapp_name:
       - "Luiza"
+    asana_name: "Luiza Hryckiewicz"
 
   patryk_cichon:
     display_name: Patryk Cichoń
@@ -103,6 +131,7 @@ people:
     role: fullstack_developer
     whatsapp_name:
       - "Patryk Cichoń"
+    asana_name: "Patryk Cichoń"
 
   # === Administracja / Finanse ===
   dorota:
@@ -111,6 +140,8 @@ people:
     role: office_manager
     whatsapp_name:
       - "Dorota MyBed"
+    email_patterns:
+      - "dorota@mybed.pl"
 
   ewelina:
     display_name: Ewelina Sterniuk
@@ -118,6 +149,8 @@ people:
     role: chief_accountant
     whatsapp_name:
       - "Ewelina Sterniuk"
+    email_patterns:
+      - "ewelina@mybed.pl"
 
   joanna:
     display_name: Joanna Łęgowa
@@ -125,6 +158,8 @@ people:
     role: accounting
     whatsapp_name:
       - "Joanna"
+    email_patterns:
+      - "joanna@mybed.pl"
 
   beata:
     display_name: Beata Nowak
@@ -132,6 +167,8 @@ people:
     role: financial_control
     whatsapp_name:
       - "Beata"
+    email_patterns:
+      - "beata@mybed.pl"
 
   # === Transport / Logistyka ===
   blazej:
@@ -155,6 +192,8 @@ people:
     role: key_account_b2b
     whatsapp_name:
       - "Sylwia Kawa"
+    email_patterns:
+      - "sylwia@mybed.pl"
 
   # === Zewnętrzni ===
   wojciech_zyzak:

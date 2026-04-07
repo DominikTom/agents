@@ -20,6 +20,18 @@ morning_briefing:
 whatsapp_sync:
   schedule: "*/5 * * * *"          # Every 5 minutes
 
+gmail_sync:
+  schedule: "*/15 * * * *"         # Every 15 minutes
+
+calendar_sync:
+  schedule: "*/30 * * * *"         # Every 30 minutes
+
+asana_sync:
+  schedule: "*/15 * * * *"         # Every 15 minutes
+
+ideaerp_metrics:
+  schedule: "0 * * * *"            # Every hour (top of hour)
+
 task_monitor:
   schedule: "0 9,16 * * 1-5"       # Mon-Fri at 9:00 and 16:00
   model: claude-haiku-4-5-20251001
