@@ -772,3 +772,34 @@ class Database:
             f"SELECT * FROM business_metrics {where} ORDER BY date DESC, store, metric_name",
             *params,
         )
+
+    # =========================================================================
+    # Pipeline Dashboard
+    # =========================================================================
+
+    async def get_ingestion_stats(self) -> list[dict]:
+        """Get ingestion stats per source for pipeline dashboard."""
+        return await self._fetchall(
+            "SELECT source, "
+            "COUNT(*) as total, "
+            "COUNT(*) FILTER (WHERE timestamp > NOW() - INTERVAL '24 hours') as last_24h, "
+            "COUNT(*) FILTER (WHERE timestamp > NOW() - INTERVAL '1 hour') as last_1h, "
+            "MAX(timestamp) as last_event "
+            "FROM events GROUP BY source ORDER BY source"
+        )
+
+    async def get_entity_map(self) -> list[dict]:
+        """Get entity resolution map with cross-source aliases and event counts."""
+        return await self._fetchall(
+            "SELECT e.id, e.canonical_name, e.display_name, e.entity_type, "
+            "COALESCE(json_agg("
+            "  json_build_object('source', ea.source, 'alias', ea.alias_name) "
+            "  ORDER BY ea.source"
+            ") FILTER (WHERE ea.id IS NOT NULL), '[]'::json) as aliases, "
+            "(SELECT COUNT(*) FROM events ev WHERE ev.sender_entity_id = e.id) as event_count "
+            "FROM entities e "
+            "LEFT JOIN entity_aliases ea ON ea.entity_id = e.id "
+            "WHERE e.entity_type = 'person' "
+            "GROUP BY e.id "
+            "ORDER BY e.canonical_name"
+        )

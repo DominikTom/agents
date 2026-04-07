@@ -279,6 +279,51 @@ async def toggle_whatsapp_chat(request: Request, jid: str = Form(...), enabled: 
     return RedirectResponse(url="/whatsapp", status_code=302)
 
 
+@app.get("/pipeline", response_class=HTMLResponse)
+async def pipeline_page(request: Request):
+    if not require_auth(request):
+        return RedirectResponse(url="/login", status_code=302)
+
+    db = await get_db()
+    ingestion_stats = await db.get_ingestion_stats()
+    entity_map = await db.get_entity_map()
+
+    # Parse aliases JSON for template
+    for entity in entity_map:
+        aliases = entity.get("aliases", [])
+        if isinstance(aliases, str):
+            aliases = json.loads(aliases)
+        # Group aliases by source
+        by_source: dict[str, list[str]] = {}
+        for alias in aliases:
+            src = alias.get("source", "unknown")
+            by_source.setdefault(src, []).append(alias.get("alias", ""))
+        entity["aliases_by_source"] = by_source
+
+    # Business metrics - last 7 days
+    from datetime import date, timedelta
+    since_date = date.today() - timedelta(days=7)
+    metrics = await db.get_metrics(since=since_date)
+
+    # Group metrics by store and date for charts
+    metrics_by_store: dict[str, dict] = {}
+    for m in metrics:
+        store = m["store"]
+        if store not in metrics_by_store:
+            metrics_by_store[store] = {"dates": {}, "currency": m.get("currency", "PLN")}
+        d = str(m["date"])
+        if d not in metrics_by_store[store]["dates"]:
+            metrics_by_store[store]["dates"][d] = {}
+        metrics_by_store[store]["dates"][d][m["metric_name"]] = m["metric_value"]
+
+    return render(request, "pipeline.html",
+        ingestion_stats=ingestion_stats,
+        entity_map=entity_map,
+        metrics_by_store=metrics_by_store,
+        metrics_json=json.dumps(metrics_by_store, ensure_ascii=False, default=str),
+    )
+
+
 @app.get("/connectors", response_class=HTMLResponse)
 async def connectors_page(request: Request):
     if not require_auth(request):

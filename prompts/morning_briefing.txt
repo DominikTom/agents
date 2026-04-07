@@ -7,7 +7,7 @@ ZASADY:
 4. Podaj konkretne liczby (zamówienia, przychód)
 5. Przy mailach: kto napisał, o czym, czy wymaga odpowiedzi
 6. Przy taskach: kto ma overdue, ile tasków due today
-7. Przy zamówieniach: porównaj z wczoraj (więcej/mniej)
+7. Przy zamówieniach: główne podsumowanie to WCZORAJSZY dzień (period=yesterday) - pełne zamówienia i przychód per sklep. Porównuj przychód wczoraj vs przedwczoraj (period=day_before_yesterday) jako % zmiana. "today_so_far" podaj informacyjnie ("Do tej pory dziś: X zamówień") BEZ porównań i BEZ alarmów - dzień dopiero się zaczął. Alert 🔴 tylko jeśli wczorajszy przychód spadł >30% vs przedwczoraj
 8. Pomiń newslettery i automatyczne potwierdzenia
 9. WhatsApp: podsumuj kluczowe wiadomości z grup firmowych
 10. Kalendarz: wymień spotkania z godzinami
@@ -33,10 +33,11 @@ FORMAT RAPORTU:
 
 📱 WHATSAPP: [podsumowanie grup firmowych]
 
-🛒 ZAMÓWIENIA:
-- mybed.pl: [dziś] zam. / [kwota] PLN (wczoraj: [porównanie])
-- mybed.de: [dziś] zam. / [kwota] EUR
-- mittohome.pl: [dziś] zam. / [kwota] PLN
+🛒 ZAMÓWIENIA (wczoraj):
+- mybed.pl: [wczoraj] zam. / [kwota] PLN ([+/-X% vs przedwczoraj])
+- mybed.de: [wczoraj] zam. / [kwota] EUR ([+/-X% vs przedwczoraj])
+- mittohome.pl: [wczoraj] zam. / [kwota] PLN ([+/-X% vs przedwczoraj])
+📌 Do tej pory dziś: [X] zam. łącznie (informacyjnie)
 
 📅 KALENDARZ: [spotkania z godzinami]
 ```

@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% set active = "pipeline" %}
+
+{% block title %}Pipeline{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div>
+        <h1 class="text-2xl font-bold text-gray-900">Pipeline danych</h1>
+        <p class="text-gray-500 mt-1">Status ingestion, entity resolution i metryki biznesowe</p>
+    </div>
+
+    <!-- Section 1: Ingestion Status -->
+    <div>
+        <h2 class="text-lg font-semibold text-gray-800 mb-4">Ingestion Status</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+            {% for stat in ingestion_stats %}
+            <div class="bg-white rounded-xl shadow-sm border p-5">
+                <div class="flex items-center justify-between mb-3">
+                    <span class="text-sm font-medium text-gray-600 uppercase">{{ stat.source }}</span>
+                    {% if stat.last_1h > 0 %}
+                    <span class="w-3 h-3 rounded-full bg-green-400" title="Active (events in last hour)"></span>
+                    {% elif stat.last_24h > 0 %}
+                    <span class="w-3 h-3 rounded-full bg-yellow-400" title="Idle (no events in last hour)"></span>
+                    {% else %}
+                    <span class="w-3 h-3 rounded-full bg-red-400" title="No events in 24h"></span>
+                    {% endif %}
+                </div>
+                <div class="text-3xl font-bold text-gray-900">{{ stat.total }}</div>
+                <div class="text-sm text-gray-500 mt-1">events total</div>
+                <div class="mt-3 pt-3 border-t text-xs text-gray-400 space-y-1">
+                    <div>Last 24h: <span class="text-gray-600 font-medium">+{{ stat.last_24h }}</span></div>
+                    <div>Last 1h: <span class="text-gray-600 font-medium">+{{ stat.last_1h }}</span></div>
+                    <div>Last event: <span class="text-gray-600">
+                        {% if stat.last_event %}
+                            {{ stat.last_event.strftime('%d.%m %H:%M') }}
+                        {% else %}
+                            never
+                        {% endif %}
+                    </span></div>
+                </div>
+            </div>
+            {% endfor %}
+
+            {% if not ingestion_stats %}
+            <div class="col-span-full text-center text-gray-400 py-8">
+                Brak danych w tabeli events. Poczekaj na pierwszy sync.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Section 2: Entity Resolution Map -->
+    <div>
+        <h2 class="text-lg font-semibold text-gray-800 mb-4">Entity Resolution</h2>
+        <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Osoba</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">WhatsApp</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Gmail</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Asana</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Slack</th>
+                            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Events</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        {% for entity in entity_map %}
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-4 py-3 text-sm font-medium text-gray-900">{{ entity.canonical_name }}</td>
+                            <td class="px-4 py-3 text-sm text-gray-500">
+                                {% for alias in entity.aliases_by_source.get('whatsapp', []) %}
+                                <span class="inline-block bg-green-50 text-green-700 text-xs px-2 py-0.5 rounded mr-1">{{ alias }}</span>
+                                {% endfor %}
+                                {% if not entity.aliases_by_source.get('whatsapp') %}
+                                <span class="text-gray-300">-</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-4 py-3 text-sm text-gray-500">
+                                {% for alias in entity.aliases_by_source.get('gmail', []) %}
+                                <span class="inline-block bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded mr-1">{{ alias }}</span>
+                                {% endfor %}
+                                {% if not entity.aliases_by_source.get('gmail') %}
+                                <span class="text-gray-300">-</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-4 py-3 text-sm text-gray-500">
+                                {% for alias in entity.aliases_by_source.get('asana', []) %}
+                                <span class="inline-block bg-orange-50 text-orange-700 text-xs px-2 py-0.5 rounded mr-1">{{ alias }}</span>
+                                {% endfor %}
+                                {% if not entity.aliases_by_source.get('asana') %}
+                                <span class="text-gray-300">-</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-4 py-3 text-sm text-gray-500">
+                                {% for alias in entity.aliases_by_source.get('slack', []) %}
+                                <span class="inline-block bg-purple-50 text-purple-700 text-xs px-2 py-0.5 rounded mr-1">{{ alias }}</span>
+                                {% endfor %}
+                                {% if not entity.aliases_by_source.get('slack') %}
+                                <span class="text-gray-300">-</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-4 py-3 text-sm text-right font-mono">
+                                {% if entity.event_count > 0 %}
+                                <span class="text-gray-900 font-medium">{{ entity.event_count }}</span>
+                                {% else %}
+                                <span class="text-gray-300">0</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% if not entity_map %}
+            <div class="text-center text-gray-400 py-8">
+                Brak entities w bazie. Sprawdz seeding z people.yaml.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Section 3: Business Metrics -->
+    <div>
+        <h2 class="text-lg font-semibold text-gray-800 mb-4">Metryki biznesowe (7 dni)</h2>
+
+        {% if metrics_by_store %}
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+            {% for store, data in metrics_by_store.items() %}
+            <div class="bg-white rounded-xl shadow-sm border p-5">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="font-semibold text-gray-900">{{ store }}</h3>
+                    <span class="text-xs text-gray-400">{{ data.currency }}</span>
+                </div>
+                {% set dates = data.dates.keys()|sort|reverse|list %}
+                {% if dates %}
+                {% set latest = data.dates[dates[0]] %}
+                <div class="text-2xl font-bold text-gray-900">
+                    {{ latest.get('orders_count', 0)|int }} zam.
+                </div>
+                <div class="text-sm text-gray-500">
+                    {{ "%.2f"|format(latest.get('revenue', 0)) }} {{ data.currency }}
+                </div>
+                {% if dates|length > 1 %}
+                {% set prev = data.dates[dates[1]] %}
+                {% set prev_rev = prev.get('revenue', 0) %}
+                {% if prev_rev > 0 %}
+                {% set pct = ((latest.get('revenue', 0) - prev_rev) / prev_rev * 100)|round(1) %}
+                <div class="mt-2 text-sm {% if pct >= 0 %}text-green-600{% else %}text-red-600{% endif %}">
+                    {% if pct >= 0 %}+{% endif %}{{ pct }}% vs poprzedni dzien
+                </div>
+                {% endif %}
+                {% endif %}
+                {% else %}
+                <div class="text-gray-400 text-sm">Brak danych</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- Revenue chart -->
+        <div class="bg-white rounded-xl shadow-sm border p-5">
+            <canvas id="revenueChart" height="100"></canvas>
+        </div>
+        {% else %}
+        <div class="bg-white rounded-xl shadow-sm border p-8 text-center text-gray-400">
+            Brak danych w tabeli business_metrics. Poczekaj na sync IdeaERP.
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const metricsData = {{ metrics_json|safe }};
+
+// Build revenue chart
+const stores = Object.keys(metricsData);
+if (stores.length > 0) {
+    // Collect all unique dates
+    const allDates = new Set();
+    stores.forEach(store => {
+        Object.keys(metricsData[store].dates).forEach(d => allDates.add(d));
+    });
+    const dates = Array.from(allDates).sort();
+
+    const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+
+    const datasets = stores.map((store, i) => ({
+        label: store,
+        data: dates.map(d => {
+            const dayData = metricsData[store].dates[d];
+            return dayData ? (dayData.revenue || 0) : null;
+        }),
+        borderColor: colors[i % colors.length],
+        backgroundColor: colors[i % colors.length] + '20',
+        fill: true,
+        tension: 0.3,
+        spanGaps: true,
+    }));
+
+    new Chart(document.getElementById('revenueChart'), {
+        type: 'line',
+        data: { labels: dates, datasets },
+        options: {
+            responsive: true,
+            plugins: {
+                title: { display: true, text: 'Przychod dzienny (7 dni)' },
+                legend: { position: 'bottom' },
+            },
+            scales: {
+                y: { beginAtZero: true, title: { display: true, text: 'Revenue' } },
+            },
+        },
+    });
+}
+</script>
+{% endblock %}

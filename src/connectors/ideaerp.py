@@ -78,17 +78,20 @@ class IdeaERPConnector(BaseConnector):
         now_warsaw = datetime.now(warsaw)
         today_start_warsaw = now_warsaw.replace(hour=0, minute=0, second=0, microsecond=0)
         yesterday_start_warsaw = today_start_warsaw - timedelta(days=1)
+        day_before_start_warsaw = yesterday_start_warsaw - timedelta(days=1)
 
         # Convert Warsaw midnight boundaries to UTC for API queries
         today_start_utc = today_start_warsaw.astimezone(timezone.utc)
         yesterday_start_utc = yesterday_start_warsaw.astimezone(timezone.utc)
+        day_before_start_utc = day_before_start_warsaw.astimezone(timezone.utc)
         now_utc = now_warsaw.astimezone(timezone.utc)
 
         items = []
 
         for label, date_from, date_to in [
-            ("today", today_start_utc, now_utc),
             ("yesterday", yesterday_start_utc, today_start_utc),
+            ("day_before_yesterday", day_before_start_utc, yesterday_start_utc),
+            ("today_so_far", today_start_utc, now_utc),
         ]:
             orders = await self._fetch_orders_paginated(
                 client,
