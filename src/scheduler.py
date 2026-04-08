@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 async def _init_db_and_run(agent_cls, config: dict) -> None:
     """Generic job runner: init DB, create agent, run, cleanup."""
     db = Database()
-    await db.init()
+    await db.init(run_schema=False)
     try:
         ai_client = AIClient()
         slack_output = SlackOutput(config)
@@ -45,7 +45,7 @@ async def run_whatsapp_sync(config: dict) -> None:
     from src.ingestion.whatsapp_ingest import WhatsAppIngestor
 
     db = Database()
-    await db.init()
+    await db.init(run_schema=False)
     try:
         bridge_url = get_env("WHATSAPP_BRIDGE_URL")
         ingestor = WhatsAppIngestor(db, bridge_url)
@@ -61,7 +61,7 @@ async def run_gmail_sync(config: dict) -> None:
     from src.ingestion.gmail_ingest import GmailIngestor
 
     db = Database()
-    await db.init()
+    await db.init(run_schema=False)
     try:
         ingestor = GmailIngestor(db)
         await ingestor.sync(lookback_hours=1)
@@ -76,7 +76,7 @@ async def run_calendar_sync(config: dict) -> None:
     from src.ingestion.calendar_ingest import CalendarIngestor
 
     db = Database()
-    await db.init()
+    await db.init(run_schema=False)
     try:
         ingestor = CalendarIngestor(db, config)
         await ingestor.sync(days_ahead=2)
@@ -91,7 +91,7 @@ async def run_asana_sync(config: dict) -> None:
     from src.ingestion.asana_ingest import AsanaIngestor
 
     db = Database()
-    await db.init()
+    await db.init(run_schema=False)
     try:
         ingestor = AsanaIngestor(db, config)
         await ingestor.sync()
@@ -106,7 +106,7 @@ async def run_ideaerp_metrics(config: dict) -> None:
     from src.ingestion.ideaerp_ingest import IdeaERPMetricsIngestor
 
     db = Database()
-    await db.init()
+    await db.init(run_schema=False)
     try:
         ingestor = IdeaERPMetricsIngestor(db, config)
         await ingestor.sync()

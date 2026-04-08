@@ -212,13 +212,14 @@ class Database:
     def __init__(self):
         self._pool: asyncpg.Pool | None = None
 
-    async def init(self) -> None:
-        """Initialize connection pool and create tables."""
+    async def init(self, run_schema: bool = True) -> None:
+        """Initialize connection pool and optionally create tables."""
         dsn = _dsn()
         self._pool = await asyncpg.create_pool(dsn, min_size=2, max_size=10)
 
-        async with self._pool.acquire() as conn:
-            await conn.execute(SCHEMA_SQL)
+        if run_schema:
+            async with self._pool.acquire() as conn:
+                await conn.execute(SCHEMA_SQL)
 
         logger.info("PostgreSQL database initialized")
 

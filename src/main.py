@@ -46,8 +46,14 @@ async def run_agent(agent_name: str, config: dict) -> None:
     from src.agents.task_monitor import TaskMonitorAgent
     from src.ai.client import AIClient
     from src.outputs.slack_output import SlackOutput
+    from src.storage.database import Database
+    from src.processing.entity_resolver import EntityResolver
 
-    db, resolver = await init_system(config)
+    db = Database()
+    await db.init(run_schema=False)
+    resolver = EntityResolver(db)
+    people_config = config.get("people", {})
+    await resolver.seed_from_config(people_config)
     ai_client = AIClient()
     slack_output = SlackOutput(config)
 
