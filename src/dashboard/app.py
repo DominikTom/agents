@@ -19,6 +19,7 @@ from src.dashboard.auth import verify_login, verify_session, logout
 from src.storage.database import Database
 from src.mcp_server.server import set_mcp_db, create_mcp_app
 from src.mcp_server.auth import BearerAuthMiddleware
+from src.mcp_server.oauth import router as oauth_router
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ async def lifespan(app):
 
 
 app = FastAPI(title="Agents Dashboard", lifespan=lifespan)
+app.include_router(oauth_router)
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/mcp", _mcp_with_auth)
