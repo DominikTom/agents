@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import yaml
@@ -24,33 +25,34 @@ logger = logging.getLogger(__name__)
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 
-app = FastAPI(title="Agents Dashboard")
-templates = Jinja2Templates(directory=TEMPLATES_DIR)
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-
-# Mount MCP server with Bearer token auth
+# Create MCP app at module level
 _mcp_asgi = create_mcp_app()
 _mcp_with_auth = BearerAuthMiddleware(_mcp_asgi)
-app.mount("/mcp", _mcp_with_auth)
 
 # Global database instance - initialized on startup
 _db: Database | None = None
 
 
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app):
     global _db
     _db = Database()
     await _db.init()
     set_mcp_db(_db)
     logger.info("Dashboard database pool initialized (MCP server attached)")
 
+    # Chain MCP app's lifespan to initialize its task group / session manager
+    async with _mcp_asgi.router.lifespan_context(_mcp_asgi):
+        yield
 
-@app.on_event("shutdown")
-async def shutdown():
-    global _db
     if _db:
         await _db.close()
+
+
+app = FastAPI(title="Agents Dashboard", lifespan=lifespan)
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.mount("/mcp", _mcp_with_auth)
 
 
 # --- Helpers ---
