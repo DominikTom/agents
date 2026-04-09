@@ -37,4 +37,12 @@ class BearerAuthMiddleware:
                 await response(scope, receive, send)
                 return
 
+            # Rewrite Host header to localhost to satisfy MCP SDK's DNS rebinding protection
+            # (we're behind a reverse proxy, auth is already verified above)
+            new_headers = [
+                (b"host", b"localhost") if name == b"host" else (name, value)
+                for name, value in scope.get("headers", [])
+            ]
+            scope = {**scope, "headers": new_headers}
+
         await self.app(scope, receive, send)
