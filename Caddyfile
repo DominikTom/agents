@@ -1,3 +1,10 @@
 agents.mybed.pl {
-	reverse_proxy agents:8080
+	handle /mcp/* {
+		reverse_proxy agents:8080 {
+			header_up Host localhost
+		}
+	}
+	handle {
+		reverse_proxy agents:8080
+	}
 }
