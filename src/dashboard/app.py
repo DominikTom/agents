@@ -16,6 +16,8 @@ from starlette.templating import Jinja2Templates
 from src.common.config import load_config, PROJECT_ROOT, CONFIG_DIR
 from src.dashboard.auth import verify_login, verify_session, logout
 from src.storage.database import Database
+from src.mcp_server.server import set_mcp_db, create_mcp_app
+from src.mcp_server.auth import BearerAuthMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,11 @@ app = FastAPI(title="Agents Dashboard")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+# Mount MCP server with Bearer token auth
+_mcp_asgi = create_mcp_app()
+_mcp_with_auth = BearerAuthMiddleware(_mcp_asgi)
+app.mount("/mcp", _mcp_with_auth)
+
 # Global database instance - initialized on startup
 _db: Database | None = None
 
@@ -35,7 +42,8 @@ async def startup():
     global _db
     _db = Database()
     await _db.init()
-    logger.info("Dashboard database pool initialized")
+    set_mcp_db(_db)
+    logger.info("Dashboard database pool initialized (MCP server attached)")
 
 
 @app.on_event("shutdown")

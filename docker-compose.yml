@@ -22,8 +22,6 @@ services:
     container_name: daily-agents
     restart: unless-stopped
     env_file: .env
-    ports:
-      - "8080:8080"
     volumes:
       - ./config:/app/config
       - ./data:/app/data
@@ -33,6 +31,20 @@ services:
         condition: service_healthy
       whatsapp-bridge:
         condition: service_started
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: agents-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - agents
 
   whatsapp-bridge:
     build: ./whatsapp-bridge
@@ -48,3 +60,5 @@ volumes:
   pgdata:
   whatsapp-auth:
   whatsapp-data:
+  caddy-data:
+  caddy-config:
