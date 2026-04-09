@@ -44,6 +44,7 @@ async def run_agent(agent_name: str, config: dict) -> None:
     """Run a single agent immediately."""
     from src.agents.morning_briefing import MorningBriefingAgent
     from src.agents.task_monitor import TaskMonitorAgent
+    from src.agents.daily_wrap import DailyWrapAgent
     from src.ai.client import AIClient
     from src.outputs.slack_output import SlackOutput
     from src.storage.database import Database
@@ -66,6 +67,13 @@ async def run_agent(agent_name: str, config: dict) -> None:
         )
     elif agent_name in ("monitor", "task-monitor"):
         agent = TaskMonitorAgent(
+            config=config,
+            ai_client=ai_client,
+            outputs=[slack_output],
+            db=db,
+        )
+    elif agent_name in ("wrap", "daily-wrap"):
+        agent = DailyWrapAgent(
             config=config,
             ai_client=ai_client,
             outputs=[slack_output],
@@ -123,7 +131,7 @@ def main() -> None:
 
     run_parser = subparsers.add_parser("run", help="Run an agent now")
     run_parser.add_argument(
-        "agent", choices=["briefing", "monitor"], help="Agent to run"
+        "agent", choices=["briefing", "monitor", "wrap"], help="Agent to run"
     )
 
     test_parser = subparsers.add_parser("test-connector", help="Test a connector")

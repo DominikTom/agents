@@ -291,6 +291,32 @@ async def toggle_whatsapp_chat(request: Request, jid: str = Form(...), enabled: 
     return RedirectResponse(url="/whatsapp", status_code=302)
 
 
+@app.post("/api/entity/alias")
+async def add_entity_alias(
+    request: Request,
+    entity_id: int = Form(...),
+    source: str = Form(...),
+    alias_name: str = Form(...),
+):
+    if not require_auth(request):
+        return {"error": "unauthorized"}
+
+    db = await get_db()
+    await db.upsert_alias(int(entity_id), source, alias_name.strip())
+    await db.resolve_unlinked_events(source, alias_name.strip(), int(entity_id))
+    return RedirectResponse(url="/pipeline", status_code=302)
+
+
+@app.post("/api/entity/alias/delete")
+async def delete_entity_alias(request: Request, alias_id: int = Form(...)):
+    if not require_auth(request):
+        return {"error": "unauthorized"}
+
+    db = await get_db()
+    await db.delete_alias(int(alias_id))
+    return RedirectResponse(url="/pipeline", status_code=302)
+
+
 @app.get("/pipeline", response_class=HTMLResponse)
 async def pipeline_page(request: Request):
     if not require_auth(request):
@@ -300,16 +326,18 @@ async def pipeline_page(request: Request):
     ingestion_stats = await db.get_ingestion_stats()
     entity_map = await db.get_entity_map()
 
-    # Parse aliases JSON for template
+    # Parse aliases JSON for template (now includes alias ID for delete buttons)
     for entity in entity_map:
         aliases = entity.get("aliases", [])
         if isinstance(aliases, str):
             aliases = json.loads(aliases)
-        # Group aliases by source
-        by_source: dict[str, list[str]] = {}
+        by_source: dict[str, list[dict]] = {}
         for alias in aliases:
             src = alias.get("source", "unknown")
-            by_source.setdefault(src, []).append(alias.get("alias", ""))
+            by_source.setdefault(src, []).append({
+                "id": alias.get("id"),
+                "name": alias.get("alias", ""),
+            })
         entity["aliases_by_source"] = by_source
 
     # Business metrics - last 7 days

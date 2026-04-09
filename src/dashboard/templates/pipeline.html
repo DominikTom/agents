@@ -53,6 +53,40 @@
     <!-- Section 2: Entity Resolution Map -->
     <div>
         <h2 class="text-lg font-semibold text-gray-800 mb-4">Entity Resolution</h2>
+
+        <!-- Add alias form -->
+        <div class="bg-white rounded-xl shadow-sm border p-5 mb-4">
+            <h3 class="text-sm font-semibold text-gray-700 mb-3">Dodaj alias</h3>
+            <form method="POST" action="/api/entity/alias" class="flex flex-wrap items-end gap-3">
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Osoba</label>
+                    <select name="entity_id" class="rounded-lg border-gray-300 text-sm" required>
+                        {% for entity in entity_map %}
+                        <option value="{{ entity.id }}">{{ entity.display_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Zrodlo</label>
+                    <select name="source" class="rounded-lg border-gray-300 text-sm" required>
+                        <option value="gmail">Gmail</option>
+                        <option value="whatsapp">WhatsApp</option>
+                        <option value="asana">Asana</option>
+                        <option value="slack">Slack</option>
+                        <option value="calendar">Calendar</option>
+                    </select>
+                </div>
+                <div class="flex-1 min-w-[200px]">
+                    <label class="block text-xs text-gray-500 mb-1">Alias (email, nazwa, itp.)</label>
+                    <input type="text" name="alias_name" placeholder="np. jan@firma.pl"
+                           class="w-full rounded-lg border-gray-300 text-sm" required>
+                </div>
+                <button type="submit" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
+                    Dodaj
+                </button>
+            </form>
+        </div>
+
         <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
             <div class="overflow-x-auto">
                 <table class="min-w-full divide-y divide-gray-200">
@@ -71,36 +105,52 @@
                         <tr class="hover:bg-gray-50">
                             <td class="px-4 py-3 text-sm font-medium text-gray-900">{{ entity.canonical_name }}</td>
                             <td class="px-4 py-3 text-sm text-gray-500">
-                                {% for alias in entity.aliases_by_source.get('whatsapp', []) %}
-                                <span class="inline-block bg-green-50 text-green-700 text-xs px-2 py-0.5 rounded mr-1">{{ alias }}</span>
+                                {% for a in entity.aliases_by_source.get('whatsapp', []) %}
+                                <span class="inline-flex items-center bg-green-50 text-green-700 text-xs px-2 py-0.5 rounded mr-1 group">
+                                    {{ a.name }}
+                                    <form method="POST" action="/api/entity/alias/delete" class="inline ml-1 opacity-0 group-hover:opacity-100">
+                                        <input type="hidden" name="alias_id" value="{{ a.id }}">
+                                        <button type="submit" class="text-green-400 hover:text-red-500" title="Usun">&times;</button>
+                                    </form>
+                                </span>
                                 {% endfor %}
-                                {% if not entity.aliases_by_source.get('whatsapp') %}
-                                <span class="text-gray-300">-</span>
-                                {% endif %}
+                                {% if not entity.aliases_by_source.get('whatsapp') %}<span class="text-gray-300">-</span>{% endif %}
                             </td>
                             <td class="px-4 py-3 text-sm text-gray-500">
-                                {% for alias in entity.aliases_by_source.get('gmail', []) %}
-                                <span class="inline-block bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded mr-1">{{ alias }}</span>
+                                {% for a in entity.aliases_by_source.get('gmail', []) %}
+                                <span class="inline-flex items-center bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded mr-1 group">
+                                    {{ a.name }}
+                                    <form method="POST" action="/api/entity/alias/delete" class="inline ml-1 opacity-0 group-hover:opacity-100">
+                                        <input type="hidden" name="alias_id" value="{{ a.id }}">
+                                        <button type="submit" class="text-blue-400 hover:text-red-500" title="Usun">&times;</button>
+                                    </form>
+                                </span>
                                 {% endfor %}
-                                {% if not entity.aliases_by_source.get('gmail') %}
-                                <span class="text-gray-300">-</span>
-                                {% endif %}
+                                {% if not entity.aliases_by_source.get('gmail') %}<span class="text-gray-300">-</span>{% endif %}
                             </td>
                             <td class="px-4 py-3 text-sm text-gray-500">
-                                {% for alias in entity.aliases_by_source.get('asana', []) %}
-                                <span class="inline-block bg-orange-50 text-orange-700 text-xs px-2 py-0.5 rounded mr-1">{{ alias }}</span>
+                                {% for a in entity.aliases_by_source.get('asana', []) %}
+                                <span class="inline-flex items-center bg-orange-50 text-orange-700 text-xs px-2 py-0.5 rounded mr-1 group">
+                                    {{ a.name }}
+                                    <form method="POST" action="/api/entity/alias/delete" class="inline ml-1 opacity-0 group-hover:opacity-100">
+                                        <input type="hidden" name="alias_id" value="{{ a.id }}">
+                                        <button type="submit" class="text-orange-400 hover:text-red-500" title="Usun">&times;</button>
+                                    </form>
+                                </span>
                                 {% endfor %}
-                                {% if not entity.aliases_by_source.get('asana') %}
-                                <span class="text-gray-300">-</span>
-                                {% endif %}
+                                {% if not entity.aliases_by_source.get('asana') %}<span class="text-gray-300">-</span>{% endif %}
                             </td>
                             <td class="px-4 py-3 text-sm text-gray-500">
-                                {% for alias in entity.aliases_by_source.get('slack', []) %}
-                                <span class="inline-block bg-purple-50 text-purple-700 text-xs px-2 py-0.5 rounded mr-1">{{ alias }}</span>
+                                {% for a in entity.aliases_by_source.get('slack', []) %}
+                                <span class="inline-flex items-center bg-purple-50 text-purple-700 text-xs px-2 py-0.5 rounded mr-1 group">
+                                    {{ a.name }}
+                                    <form method="POST" action="/api/entity/alias/delete" class="inline ml-1 opacity-0 group-hover:opacity-100">
+                                        <input type="hidden" name="alias_id" value="{{ a.id }}">
+                                        <button type="submit" class="text-purple-400 hover:text-red-500" title="Usun">&times;</button>
+                                    </form>
+                                </span>
                                 {% endfor %}
-                                {% if not entity.aliases_by_source.get('slack') %}
-                                <span class="text-gray-300">-</span>
-                                {% endif %}
+                                {% if not entity.aliases_by_source.get('slack') %}<span class="text-gray-300">-</span>{% endif %}
                             </td>
                             <td class="px-4 py-3 text-sm text-right font-mono">
                                 {% if entity.event_count > 0 %}

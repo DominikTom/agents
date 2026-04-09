@@ -40,6 +40,11 @@ async def run_task_monitor(config: dict) -> None:
     await _init_db_and_run(TaskMonitorAgent, config)
 
 
+async def run_daily_wrap(config: dict) -> None:
+    from src.agents.daily_wrap import DailyWrapAgent
+    await _init_db_and_run(DailyWrapAgent, config)
+
+
 async def run_whatsapp_sync(config: dict) -> None:
     """Sync WhatsApp messages from bridge to PostgreSQL."""
     from src.ingestion.whatsapp_ingest import WhatsAppIngestor
@@ -164,6 +169,19 @@ async def create_scheduler(config: dict) -> AsyncIOScheduler:
         replace_existing=True,
     )
     logger.info(f"Scheduled task_monitor: {monitor_cron} ({timezone})")
+
+    # Daily Wrap (afternoon summary + tomorrow plan)
+    wrap_config = agents_config.get("daily_wrap", {})
+    wrap_cron = wrap_config.get("schedule", "0 16 * * 1-5")
+    scheduler.add_job(
+        run_daily_wrap,
+        trigger=CronTrigger(**_parse_cron(wrap_cron), timezone=timezone),
+        args=[config],
+        id="daily_wrap",
+        name="Daily Wrap",
+        replace_existing=True,
+    )
+    logger.info(f"Scheduled daily_wrap: {wrap_cron} ({timezone})")
 
     # WhatsApp Sync - every 5 minutes
     wa_config = agents_config.get("whatsapp_sync", {})

@@ -794,7 +794,7 @@ class Database:
         return await self._fetchall(
             "SELECT e.id, e.canonical_name, e.display_name, e.entity_type, "
             "COALESCE(json_agg("
-            "  json_build_object('source', ea.source, 'alias', ea.alias_name) "
+            "  json_build_object('id', ea.id, 'source', ea.source, 'alias', ea.alias_name) "
             "  ORDER BY ea.source"
             ") FILTER (WHERE ea.id IS NOT NULL), '[]'::json) as aliases, "
             "(SELECT COUNT(*) FROM events ev WHERE ev.sender_entity_id = e.id) as event_count "
@@ -804,3 +804,41 @@ class Database:
             "GROUP BY e.id "
             "ORDER BY e.canonical_name"
         )
+
+    async def delete_alias(self, alias_id: int) -> None:
+        """Delete an entity alias by ID."""
+        await self._execute("DELETE FROM entity_aliases WHERE id = $1", alias_id)
+
+    async def resolve_unlinked_events(
+        self, source: str, alias_name: str, entity_id: int
+    ) -> None:
+        """Retroactively link unlinked events where sender matches the new alias."""
+        if source == "gmail":
+            await self._execute(
+                "UPDATE events SET sender_entity_id = $1 "
+                "WHERE source = 'gmail' AND sender_entity_id IS NULL "
+                "AND (metadata->>'from' ILIKE '%' || $2 || '%' "
+                "OR metadata->>'sender_name' ILIKE '%' || $2 || '%')",
+                entity_id, alias_name,
+            )
+        elif source == "whatsapp":
+            await self._execute(
+                "UPDATE events SET sender_entity_id = $1 "
+                "WHERE source = 'whatsapp' AND sender_entity_id IS NULL "
+                "AND metadata->>'sender_name' = $2",
+                entity_id, alias_name,
+            )
+        elif source == "asana":
+            await self._execute(
+                "UPDATE events SET sender_entity_id = $1 "
+                "WHERE source = 'asana' AND sender_entity_id IS NULL "
+                "AND metadata->>'assignee' ILIKE '%' || $2 || '%'",
+                entity_id, alias_name,
+            )
+        else:
+            await self._execute(
+                "UPDATE events SET sender_entity_id = $1 "
+                "WHERE source = $2 AND sender_entity_id IS NULL "
+                "AND (title ILIKE '%' || $3 || '%' OR body ILIKE '%' || $3 || '%')",
+                entity_id, source, alias_name,
+            )

@@ -32,8 +32,18 @@ asana_sync:
 ideaerp_metrics:
   schedule: "0 * * * *"            # Every hour (top of hour)
 
+daily_wrap:
+  schedule: "0 16 * * 1-5"          # Mon-Fri at 16:00
+  model: claude-sonnet-4-20250514
+  max_tokens: 4096
+  connectors:
+    - google_calendar
+  outputs:
+    - type: slack
+      channel: "#daily-wrap"
+
 task_monitor:
-  schedule: "0 9,16 * * 1-5"       # Mon-Fri at 9:00 and 16:00
+  schedule: "0 9 * * 1-5"           # Mon-Fri at 9:00 only (afternoon moved to daily_wrap)
   model: claude-haiku-4-5-20251001
   max_tokens: 2048
   blocked_threshold_days: 3
