@@ -7,6 +7,18 @@ from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecurityMiddleware, TransportSecuritySettings
+
+# Disable DNS rebinding protection - we're behind Caddy reverse proxy
+# and handle authentication via Bearer token in BearerAuthMiddleware
+_orig_ts_init = TransportSecurityMiddleware.__init__
+
+
+def _init_no_dns_rebinding(self, settings=None):
+    _orig_ts_init(self, TransportSecuritySettings(enable_dns_rebinding_protection=False))
+
+
+TransportSecurityMiddleware.__init__ = _init_no_dns_rebinding
 
 from src.mcp_server.formatters import (
     format_events,
