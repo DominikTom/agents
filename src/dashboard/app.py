@@ -364,6 +364,68 @@ async def pipeline_page(request: Request):
     )
 
 
+@app.get("/topics", response_class=HTMLResponse)
+async def topics_page(request: Request):
+    if not require_auth(request):
+        return RedirectResponse(url="/login", status_code=302)
+
+    db = await get_db()
+    raw_topics = await db.get_active_topics(limit=30)
+
+    # Load events for each topic
+    topics = []
+    for t in raw_topics:
+        full = await db.get_topic_with_events(t["id"], limit=20)
+        if full:
+            topics.append(full)
+
+    return render(request, "topics.html", topics=topics)
+
+
+@app.post("/api/topics/create")
+async def create_topic(request: Request, name: str = Form(...), description: str = Form(""), category: str = Form("other")):
+    if not require_auth(request):
+        return {"error": "unauthorized"}
+
+    db = await get_db()
+    await db.upsert_topic(name=name.strip(), description=description.strip(), category=category)
+    return RedirectResponse(url="/topics", status_code=302)
+
+
+@app.post("/api/topics/close")
+async def close_topic(request: Request, topic_id: int = Form(...)):
+    if not require_auth(request):
+        return {"error": "unauthorized"}
+
+    db = await get_db()
+    await db._execute("UPDATE topics SET status = 'closed' WHERE id = $1", int(topic_id))
+    return RedirectResponse(url="/topics", status_code=302)
+
+
+@app.post("/api/topics/unlink")
+async def unlink_topic_event(request: Request, topic_id: int = Form(...), event_id: int = Form(...)):
+    if not require_auth(request):
+        return {"error": "unauthorized"}
+
+    db = await get_db()
+    await db._execute("DELETE FROM topic_events WHERE topic_id = $1 AND event_id = $2", int(topic_id), int(event_id))
+    return RedirectResponse(url="/topics", status_code=302)
+
+
+@app.post("/api/topics/extract")
+async def trigger_topic_extraction(request: Request):
+    if not require_auth(request):
+        return {"error": "unauthorized"}
+
+    from src.ingestion.topic_extractor import TopicExtractor
+    from src.ai.client import AIClient
+
+    db = await get_db()
+    extractor = TopicExtractor(db, AIClient())
+    asyncio.create_task(extractor.extract(lookback_hours=24))
+    return RedirectResponse(url="/topics", status_code=302)
+
+
 @app.get("/connectors", response_class=HTMLResponse)
 async def connectors_page(request: Request):
     if not require_auth(request):

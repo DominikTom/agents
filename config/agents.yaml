@@ -42,6 +42,9 @@ daily_wrap:
     - type: slack
       channel: "#daily-wrap"
 
+topic_extraction:
+  schedule: "45 15 * * 1-5"         # Mon-Fri at 15:45 (before daily_wrap)
+
 task_monitor:
   schedule: "0 9 * * 1-5"           # Mon-Fri at 9:00 only (afternoon moved to daily_wrap)
   model: claude-haiku-4-5-20251001

@@ -76,9 +76,17 @@ class CalendarIngestor:
                             if a.get("responseStatus") != "declined"
                         ]
                         link = event.get("hangoutLink", "")
+                        description = event.get("description", "")
 
                         # Parse start time
                         timestamp = _parse_datetime(start_str)
+
+                        # Build rich body: time + location + agenda
+                        body_parts = [f"{start_str} - {end_str}"]
+                        if location:
+                            body_parts.append(f"Location: {location}")
+                        if description:
+                            body_parts.append(f"Agenda: {description[:1000]}")
 
                         stored_id = await self.db.store_event(
                             source="calendar",
@@ -86,7 +94,7 @@ class CalendarIngestor:
                             event_type="meeting",
                             timestamp=timestamp,
                             title=title,
-                            body=f"{start_str} - {end_str}" + (f" | {location}" if location else ""),
+                            body="\n".join(body_parts),
                             priority="normal",
                             category="calendar",
                             metadata={
@@ -95,6 +103,7 @@ class CalendarIngestor:
                                 "start": start_str,
                                 "end": end_str,
                                 "location": location,
+                                "description": description[:1000] if description else "",
                                 "attendees": attendees,
                                 "hangout_link": link,
                             },

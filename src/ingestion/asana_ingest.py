@@ -105,13 +105,16 @@ class AsanaIngestor:
                         if assignee_name and assignee_name != "Unassigned":
                             sender_entity_id = await self.db.resolve_entity("asana", assignee_name)
 
+                        # Store full notes (cap at 2000 chars)
+                        task_body = notes[:2000] if notes else f"Assignee: {assignee_name}, Due: {due}, Status: {status}"
+
                         event_id = await self.db.store_event(
                             source="asana",
                             source_id=f"asana:{gid}",
                             event_type="task",
                             timestamp=timestamp,
                             title=name,
-                            body=notes[:500] if notes else f"Assignee: {assignee_name}, Due: {due}, Status: {status}",
+                            body=task_body,
                             sender_entity_id=sender_entity_id,
                             priority="high" if status == "overdue" else "normal",
                             category=status,

@@ -109,6 +109,26 @@ class DailyWrapAgent(BaseAgent):
                 source="calendar_tomorrow", error=str(e)
             )
 
+        # --- Topics from topic extraction (cross-source threads) ---
+        try:
+            topics = await self.db.get_active_topics(limit=15)
+            topics_with_events = []
+            for t in topics:
+                full = await self.db.get_topic_with_events(t["id"], limit=10)
+                if full:
+                    topics_with_events.append(full)
+
+            if topics_with_events:
+                results["topics"] = ConnectorResult(
+                    source="topics",
+                    items=self._records_to_items_nested(topics_with_events),
+                )
+            else:
+                results["topics"] = ConnectorResult(source="topics", items=[])
+        except Exception as e:
+            logger.error(f"Topics fetch failed: {e}")
+            results["topics"] = ConnectorResult(source="topics", error=str(e))
+
         return results
 
     async def analyze(self, data: dict[str, ConnectorResult]) -> AgentReport:
@@ -195,6 +215,32 @@ class DailyWrapAgent(BaseAgent):
                     item[k] = v.isoformat()
                 elif isinstance(v, date):
                     item[k] = v.isoformat()
+                else:
+                    item[k] = v
+            items.append(item)
+        return items
+
+    @staticmethod
+    def _records_to_items_nested(records: list[dict]) -> list[dict]:
+        """Convert topic records (with nested events) to JSON-serializable items."""
+        items = []
+        for r in records:
+            item = {}
+            for k, v in r.items():
+                if isinstance(v, datetime):
+                    item[k] = v.isoformat()
+                elif isinstance(v, date):
+                    item[k] = v.isoformat()
+                elif isinstance(v, list):
+                    item[k] = [
+                        {
+                            kk: vv.isoformat() if isinstance(vv, (datetime, date)) else vv
+                            for kk, vv in sub.items()
+                        }
+                        if isinstance(sub, dict)
+                        else sub
+                        for sub in v
+                    ]
                 else:
                     item[k] = v
             items.append(item)

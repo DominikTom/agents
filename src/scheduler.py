@@ -45,6 +45,22 @@ async def run_daily_wrap(config: dict) -> None:
     await _init_db_and_run(DailyWrapAgent, config)
 
 
+async def run_topic_extraction(config: dict) -> None:
+    """Extract cross-source business topics from recent events."""
+    from src.ingestion.topic_extractor import TopicExtractor
+    from src.ai.client import AIClient
+
+    db = Database()
+    await db.init(run_schema=False)
+    try:
+        extractor = TopicExtractor(db, AIClient())
+        await extractor.extract(lookback_hours=24)
+    except Exception as e:
+        logger.error(f"Topic extraction failed: {e}")
+    finally:
+        await db.close()
+
+
 async def run_whatsapp_sync(config: dict) -> None:
     """Sync WhatsApp messages from bridge to PostgreSQL."""
     from src.ingestion.whatsapp_ingest import WhatsAppIngestor
@@ -182,6 +198,19 @@ async def create_scheduler(config: dict) -> AsyncIOScheduler:
         replace_existing=True,
     )
     logger.info(f"Scheduled daily_wrap: {wrap_cron} ({timezone})")
+
+    # Topic Extraction - before daily wrap
+    topic_config = agents_config.get("topic_extraction", {})
+    topic_cron = topic_config.get("schedule", "45 15 * * 1-5")
+    scheduler.add_job(
+        run_topic_extraction,
+        trigger=CronTrigger(**_parse_cron(topic_cron), timezone=timezone),
+        args=[config],
+        id="topic_extraction",
+        name="Topic Extraction",
+        replace_existing=True,
+    )
+    logger.info(f"Scheduled topic_extraction: {topic_cron} ({timezone})")
 
     # WhatsApp Sync - every 5 minutes
     wa_config = agents_config.get("whatsapp_sync", {})

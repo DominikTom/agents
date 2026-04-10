@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
+import base64
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -15,6 +15,7 @@ from src.storage.database import Database
 logger = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+MAX_BODY_CHARS = 2000
 
 
 class GmailIngestor:
@@ -55,12 +56,7 @@ class GmailIngestor:
                     msg = (
                         service.users()
                         .messages()
-                        .get(
-                            userId="me",
-                            id=msg_ref["id"],
-                            format="metadata",
-                            metadataHeaders=["From", "Subject", "Date"],
-                        )
+                        .get(userId="me", id=msg_ref["id"], format="full")
                         .execute()
                     )
 
@@ -70,9 +66,17 @@ class GmailIngestor:
                     }
                     sender = headers.get("From", "")
                     subject = headers.get("Subject", "")
-                    snippet = msg.get("snippet", "")
                     labels = msg.get("labelIds", [])
+                    thread_id = msg.get("threadId", "")
                     internal_date = int(msg.get("internalDate", 0)) / 1000
+                    from_me = "SENT" in labels
+
+                    # Extract full body from MIME payload
+                    body = _extract_body(msg.get("payload", {}))
+                    if not body:
+                        body = msg.get("snippet", "")
+                    if len(body) > MAX_BODY_CHARS:
+                        body = body[:MAX_BODY_CHARS] + "..."
 
                     timestamp = datetime.fromtimestamp(internal_date, tz=timezone.utc)
 
@@ -90,7 +94,7 @@ class GmailIngestor:
                         event_type="email",
                         timestamp=timestamp,
                         title=subject,
-                        body=snippet,
+                        body=body,
                         sender_entity_id=sender_entity_id,
                         priority=_classify_priority(labels),
                         category="inbox",
@@ -99,6 +103,8 @@ class GmailIngestor:
                             "sender_name": sender_name,
                             "labels": labels,
                             "gmail_id": msg_ref["id"],
+                            "thread_id": thread_id,
+                            "from_me": from_me,
                         },
                     )
 
@@ -117,6 +123,30 @@ class GmailIngestor:
             logger.info(f"Gmail sync: {stats['new_emails']} new emails ingested")
 
         return stats
+
+
+def _extract_body(payload: dict) -> str:
+    """Extract plain text body from Gmail MIME payload."""
+    # Simple message (no parts)
+    if payload.get("mimeType") == "text/plain":
+        data = payload.get("body", {}).get("data")
+        if data:
+            return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+
+    # Multipart message - find text/plain part
+    for part in payload.get("parts", []):
+        if part.get("mimeType") == "text/plain":
+            data = part.get("body", {}).get("data")
+            if data:
+                return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+        # Nested multipart (e.g., multipart/alternative inside multipart/mixed)
+        for subpart in part.get("parts", []):
+            if subpart.get("mimeType") == "text/plain":
+                data = subpart.get("body", {}).get("data")
+                if data:
+                    return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+
+    return ""
 
 
 def _extract_name(from_header: str) -> str:

@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% set active = "topics" %}
+
+{% block title %}Topics{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">Tematy biznesowe</h1>
+            <p class="text-gray-500 mt-1">Cross-source topics — automatycznie wykryte + reczna edycja</p>
+        </div>
+        <form method="POST" action="/api/topics/extract">
+            <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">
+                Wyciagnij tematy teraz
+            </button>
+        </form>
+    </div>
+
+    <!-- Create topic form -->
+    <div class="bg-white rounded-xl shadow-sm border p-5">
+        <h3 class="text-sm font-semibold text-gray-700 mb-3">Dodaj temat recznie</h3>
+        <form method="POST" action="/api/topics/create" class="flex flex-wrap items-end gap-3">
+            <div class="flex-1 min-w-[200px]">
+                <label class="block text-xs text-gray-500 mb-1">Nazwa tematu</label>
+                <input type="text" name="name" placeholder="np. Sesja zdjeciowa NOMO"
+                       class="w-full rounded-lg border-gray-300 text-sm" required>
+            </div>
+            <div class="flex-1 min-w-[200px]">
+                <label class="block text-xs text-gray-500 mb-1">Opis (opcjonalnie)</label>
+                <input type="text" name="description" placeholder="Krotki opis"
+                       class="w-full rounded-lg border-gray-300 text-sm">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">Kategoria</label>
+                <select name="category" class="rounded-lg border-gray-300 text-sm">
+                    <option value="operations">Operacje</option>
+                    <option value="product">Produkt</option>
+                    <option value="sales">Sprzedaz</option>
+                    <option value="marketing">Marketing</option>
+                    <option value="logistics">Logistyka</option>
+                    <option value="finance">Finanse</option>
+                    <option value="hr">HR</option>
+                    <option value="other">Inne</option>
+                </select>
+            </div>
+            <button type="submit" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
+                Dodaj
+            </button>
+        </form>
+    </div>
+
+    <!-- Active topics -->
+    {% for topic in topics %}
+    <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <div class="px-5 py-4 border-b flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                {% if topic.category == 'product' %}
+                <span class="text-lg">📦</span>
+                {% elif topic.category == 'operations' %}
+                <span class="text-lg">⚙️</span>
+                {% elif topic.category == 'sales' %}
+                <span class="text-lg">💰</span>
+                {% elif topic.category == 'marketing' %}
+                <span class="text-lg">📢</span>
+                {% elif topic.category == 'logistics' %}
+                <span class="text-lg">🚚</span>
+                {% elif topic.category == 'finance' %}
+                <span class="text-lg">💳</span>
+                {% else %}
+                <span class="text-lg">📌</span>
+                {% endif %}
+                <div>
+                    <h3 class="font-semibold text-gray-900">{{ topic.name }}</h3>
+                    {% if topic.description %}
+                    <p class="text-sm text-gray-500">{{ topic.description }}</p>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <span class="text-xs text-gray-400">
+                    {{ topic.event_count }} events
+                    {% if topic.last_activity_at %}
+                    | ostatnia aktywnosc: {{ topic.last_activity_at.strftime('%d.%m %H:%M') }}
+                    {% endif %}
+                </span>
+                <span class="px-2 py-1 text-xs rounded-full
+                    {% if topic.status == 'active' %}bg-green-100 text-green-700
+                    {% else %}bg-gray-100 text-gray-500{% endif %}">
+                    {{ topic.status }}
+                </span>
+                <form method="POST" action="/api/topics/close" class="inline">
+                    <input type="hidden" name="topic_id" value="{{ topic.id }}">
+                    <button type="submit" class="text-xs text-gray-400 hover:text-red-500" title="Zamknij temat">
+                        zamknij
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        {% if topic.events %}
+        <div class="divide-y divide-gray-100">
+            {% for event in topic.events[:8] %}
+            <div class="px-5 py-3 flex items-start gap-3 hover:bg-gray-50">
+                {% if event.source == 'gmail' %}
+                <span class="text-sm mt-0.5">📧</span>
+                {% elif event.source == 'whatsapp' %}
+                <span class="text-sm mt-0.5">📱</span>
+                {% elif event.source == 'asana' %}
+                <span class="text-sm mt-0.5">📋</span>
+                {% elif event.source == 'calendar' %}
+                <span class="text-sm mt-0.5">📅</span>
+                {% else %}
+                <span class="text-sm mt-0.5">📎</span>
+                {% endif %}
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs font-medium uppercase
+                            {% if event.source == 'gmail' %}text-blue-600
+                            {% elif event.source == 'whatsapp' %}text-green-600
+                            {% elif event.source == 'asana' %}text-orange-600
+                            {% elif event.source == 'calendar' %}text-purple-600
+                            {% else %}text-gray-600{% endif %}">
+                            {{ event.source }}
+                        </span>
+                        {% if event.sender_name %}
+                        <span class="text-xs text-gray-400">{{ event.sender_name }}</span>
+                        {% endif %}
+                        <span class="text-xs text-gray-300">{{ event.timestamp.strftime('%d.%m %H:%M') }}</span>
+                    </div>
+                    <div class="text-sm text-gray-800 font-medium">{{ event.title or '' }}</div>
+                    {% if event.body %}
+                    <div class="text-xs text-gray-500 mt-0.5 truncate">{{ event.body[:200] }}</div>
+                    {% endif %}
+                </div>
+                <form method="POST" action="/api/topics/unlink" class="shrink-0">
+                    <input type="hidden" name="topic_id" value="{{ topic.id }}">
+                    <input type="hidden" name="event_id" value="{{ event.id }}">
+                    <button type="submit" class="text-gray-300 hover:text-red-500 text-xs" title="Odlacz event">&times;</button>
+                </form>
+            </div>
+            {% endfor %}
+            {% if topic.events|length > 8 %}
+            <div class="px-5 py-2 text-center text-xs text-gray-400">
+                ... i {{ topic.events|length - 8 }} wiecej
+            </div>
+            {% endif %}
+        </div>
+        {% else %}
+        <div class="px-5 py-4 text-sm text-gray-400">Brak polaczonych eventow</div>
+        {% endif %}
+    </div>
+    {% endfor %}
+
+    {% if not topics %}
+    <div class="bg-white rounded-xl shadow-sm border p-8 text-center text-gray-400">
+        Brak aktywnych tematow. Kliknij "Wyciagnij tematy teraz" lub dodaj recznie.
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
