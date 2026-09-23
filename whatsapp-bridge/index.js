@@ -32,6 +32,7 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  fetchLatestWaWebVersion,
   getContentType,
   isJidBroadcast,
   isJidGroup,
@@ -331,14 +332,22 @@ async function start() {
   closeSocket()
   const gen = ++generation
   const { state: auth, saveCreds } = await useMultiFileAuthState(AUTH_DIR)
+  // WhatsApp closes the socket for clients reporting an outdated web version,
+  // so prefer the live version from web.whatsapp.com (override: WA_VERSION=2.3000.x)
   let version
-  try {
-    ;({ version } = await fetchLatestBaileysVersion())
-  } catch {
-    version = undefined // Baileys falls back to its bundled version
+  if (process.env.WA_VERSION) {
+    version = process.env.WA_VERSION.split('.').map(Number)
+  } else {
+    const web = await fetchLatestWaWebVersion({ timeout: 10000 }).catch(() => ({}))
+    if (web?.isLatest) version = web.version
+    else {
+      const lib = await fetchLatestBaileysVersion().catch(() => ({}))
+      version = lib?.version
+    }
   }
   if (gen !== generation) return
   state.waVersion = version ? version.join('.') : 'bundled'
+  log(`starting (WA ${state.waVersion}, registered: ${!!auth.creds.registered})`)
   state.status = auth.creds.registered ? 'connecting' : 'starting'
 
   sock = makeWASocket({
@@ -383,13 +392,15 @@ async function start() {
 
     if (connection === 'close') {
       const code = lastDisconnect?.error?.output?.statusCode
+      const detail = lastDisconnect?.error?.message || ''
       state.lastDisconnect = {
         code: code ?? null,
-        reason: REASONS[code] || lastDisconnect?.error?.message || 'Rozłączono',
+        reason: [REASONS[code], detail].filter(Boolean).join(' — ') || 'Rozłączono',
         at: Date.now(),
       }
       state.connectedAt = null
-      log(`connection closed (${code ?? 'no code'}): ${state.lastDisconnect.reason}`)
+      log(`connection closed (${code ?? 'no code'}): ${state.lastDisconnect.reason}`,
+        lastDisconnect?.error?.data ? JSON.stringify(lastDisconnect.error.data).slice(0, 300) : '')
 
       if (code === DisconnectReason.loggedOut || code === DisconnectReason.badSession || code === DisconnectReason.forbidden) {
         // Session is dead for good — start over with a fresh QR
