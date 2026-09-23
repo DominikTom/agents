@@ -422,6 +422,8 @@ async function start() {
         at: Date.now(),
       }
       state.connectedAt = null
+      // a QR from a closed socket can't be scanned any more — don't show it
+      state.qr = state.qrDataUrl = state.pairingCode = null
       log(`connection closed (${code ?? 'no code'}): ${state.lastDisconnect.reason}`,
         lastDisconnect?.error?.data ? JSON.stringify(lastDisconnect.error.data).slice(0, 300) : '')
       if (process.env.LOG_LEVEL === 'debug' && lastDisconnect?.error?.stack) log(lastDisconnect.error.stack)
