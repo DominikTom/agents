@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
+from email.utils import parseaddr
 from datetime import datetime, timedelta, timezone
 
 from google.oauth2.service_account import Credentials
@@ -44,20 +46,12 @@ class GmailIngestor:
             since = datetime.now() - timedelta(hours=lookback_hours)
             after_epoch = int(since.timestamp())
 
-            results = (
-                service.users()
-                .messages()
-                .list(userId="me", q=f"after:{after_epoch}", maxResults=50)
-                .execute()
-            )
+            refs = await asyncio.to_thread(_list_ids, service, f"after:{after_epoch}", 500)
 
-            for msg_ref in results.get("messages", []):
+            for msg_ref in refs:
                 try:
-                    msg = (
-                        service.users()
-                        .messages()
-                        .get(userId="me", id=msg_ref["id"], format="full")
-                        .execute()
+                    msg = await asyncio.to_thread(
+                        lambda: service.users().messages().get(userId="me", id=msg_ref["id"], format="full").execute()
                     )
 
                     headers = {
@@ -83,10 +77,11 @@ class GmailIngestor:
                     # Extract sender name for entity resolution
                     sender_name = _extract_name(sender)
                     sender_entity_id = None
-                    if sender_name:
-                        sender_entity_id = await self.db.resolve_entity("gmail", sender)
-                        if not sender_entity_id:
-                            sender_entity_id = await self.db.resolve_entity("gmail", sender_name)
+                    sender_email = parseaddr(sender)[1].lower()
+                    if sender_email:
+                        sender_entity_id = await self.db.resolve_entity("gmail", sender_email)
+                    if not sender_entity_id and sender_name:
+                        sender_entity_id = await self.db.resolve_entity("gmail", sender_name)
 
                     event_id = await self.db.store_event(
                         source="gmail",
@@ -101,10 +96,18 @@ class GmailIngestor:
                         metadata={
                             "from": sender,
                             "sender_name": sender_name,
+                            "sender_email": sender_email,
                             "labels": labels,
                             "gmail_id": msg_ref["id"],
                             "thread_id": thread_id,
                             "from_me": from_me,
+                            "to": headers.get("To", "")[:500],
+                            "cc": headers.get("Cc", "")[:500],
+                            "bulk": bool(
+                                headers.get("List-Unsubscribe")
+                                or headers.get("Precedence", "").lower() in ("bulk", "list")
+                                or "noreply" in sender.lower() or "no-reply" in sender.lower()
+                            ),
                         },
                     )
 
@@ -123,6 +126,19 @@ class GmailIngestor:
             logger.info(f"Gmail sync: {stats['new_emails']} new emails ingested")
 
         return stats
+
+
+def _list_ids(service, query: str, cap: int) -> list[dict]:
+    """All message ids matching the query (paginated, capped)."""
+    out: list[dict] = []
+    token = None
+    while len(out) < cap:
+        resp = service.users().messages().list(userId="me", q=query, maxResults=100, pageToken=token).execute()
+        out.extend(resp.get("messages", []))
+        token = resp.get("nextPageToken")
+        if not token:
+            break
+    return out[:cap]
 
 
 def _extract_body(payload: dict) -> str:

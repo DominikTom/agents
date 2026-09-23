@@ -1,0 +1,499 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+
+    /* ── Tokeny design systemu (docs/DESIGN.md) ─────────────────────────
+       Jedyne źródło wartości kolorów — Tailwind mapuje swoje nazwy
+       (canvas/surface/ink/line/primary/accent) na te zmienne.
+       Format: triplet RGB, żeby działały modyfikatory typu bg-ink/90.
+       Zero hardcodowanych hexów w komponentach. */
+    --color-canvas: 249 250 251;      /* #F9FAFB — tło aplikacji (hair-gray dla hierarchii kart) */
+    --color-surface: 255 255 255;     /* #FFFFFF — karty i powierzchnie */
+    --color-surface-dark: 28 28 30;   /* #1C1C1E — ciemna powierzchnia Auralis (hero, login) */
+    --color-surface-2: 243 244 246;   /* #F3F4F6 — hover/elevation powierzchni */
+    --color-ink: 17 24 39;            /* #111827 — text-primary */
+    --color-ink-soft: 55 65 81;       /* #374151 — tekst o krok jaśniejszy */
+    --color-ink-muted: 75 85 99;      /* #4B5563 — text-secondary */
+    --color-ink-faint: 156 163 175;   /* #9CA3AF — placeholdery, metadane */
+    --color-line: 229 231 235;        /* #E5E7EB — border */
+    --color-primary: 79 70 229;       /* #4F46E5 — primary (indygo Auralis) */
+    --color-primary-soft: 238 242 255;  /* #EEF2FF */
+    --color-primary-ink: 55 48 163;     /* #3730A3 */
+    --color-accent: 6 182 212;        /* #06B6D4 — accent (cyan Auralis) */
+    --color-accent-soft: 236 254 255;   /* #ECFEFF */
+    --color-accent-ink: 14 116 144;     /* #0E7490 */
+
+    /* Paleta avatarów: pełne, kryjące tła; tekst inicjałów biały (WCAG 4.5+) */
+    --avatar-0: 67 56 202;   /* indigo-700 */
+    --avatar-1: 3 105 161;   /* sky-700 */
+    --avatar-2: 15 118 110;   /* teal-700 */
+    --avatar-3: 4 120 87;   /* emerald-700 */
+    --avatar-4: 180 83 9;   /* amber-700 */
+    --avatar-5: 194 65 12;   /* orange-700 */
+    --avatar-6: 190 18 60;   /* rose-700 */
+    --avatar-7: 109 40 217;   /* violet-700 */
+    --avatar-8: 14 116 144;   /* cyan-700 */
+
+    /* Semantyczne tinty statusów (red/amber/emerald/…): odcienie 50-300
+       (tła/bordery) i 600-700 (tekst) przechodzą przez zmienne, żeby dark
+       mode dostał ciemne tinty (kolor zmieszany z tłem), nie jasne pastele.
+       Wartości light = oryginalna paleta Tailwinda (piksel w piksel). */
+    --tw-red-50: 254 242 242;
+    --tw-red-100: 254 226 226;
+    --tw-red-200: 254 202 202;
+    --tw-red-300: 252 165 165;
+    --tw-red-500: 239 68 68;
+    --tw-red-600: 220 38 38;
+    --tw-red-700: 185 28 28;
+    --tw-orange-50: 255 247 237;
+    --tw-orange-100: 255 237 213;
+    --tw-orange-200: 254 215 170;
+    --tw-orange-300: 253 186 116;
+    --tw-orange-500: 249 115 22;
+    --tw-orange-600: 234 88 12;
+    --tw-orange-700: 194 65 12;
+    --tw-amber-50: 255 251 235;
+    --tw-amber-100: 254 243 199;
+    --tw-amber-200: 253 230 138;
+    --tw-amber-300: 252 211 77;
+    --tw-amber-500: 245 158 11;
+    --tw-amber-600: 217 119 6;
+    --tw-amber-700: 180 83 9;
+    --tw-emerald-50: 236 253 245;
+    --tw-emerald-100: 209 250 229;
+    --tw-emerald-200: 167 243 208;
+    --tw-emerald-300: 110 231 183;
+    --tw-emerald-500: 16 185 129;
+    --tw-emerald-600: 5 150 105;
+    --tw-emerald-700: 4 120 87;
+    --tw-teal-50: 240 253 250;
+    --tw-teal-100: 204 251 241;
+    --tw-teal-200: 153 246 228;
+    --tw-teal-300: 94 234 212;
+    --tw-teal-500: 20 184 166;
+    --tw-teal-600: 13 148 136;
+    --tw-teal-700: 15 118 110;
+    --tw-cyan-50: 236 254 255;
+    --tw-cyan-100: 207 250 254;
+    --tw-cyan-200: 165 243 252;
+    --tw-cyan-300: 103 232 249;
+    --tw-cyan-500: 6 182 212;
+    --tw-cyan-600: 8 145 178;
+    --tw-cyan-700: 14 116 144;
+    --tw-sky-50: 240 249 255;
+    --tw-sky-100: 224 242 254;
+    --tw-sky-200: 186 230 253;
+    --tw-sky-300: 125 211 252;
+    --tw-sky-500: 14 165 233;
+    --tw-sky-600: 2 132 199;
+    --tw-sky-700: 3 105 161;
+    --tw-blue-50: 239 246 255;
+    --tw-blue-100: 219 234 254;
+    --tw-blue-200: 191 219 254;
+    --tw-blue-300: 147 197 253;
+    --tw-blue-500: 59 130 246;
+    --tw-blue-600: 37 99 235;
+    --tw-blue-700: 29 78 216;
+    --tw-indigo-50: 238 242 255;
+    --tw-indigo-100: 224 231 255;
+    --tw-indigo-200: 199 210 254;
+    --tw-indigo-300: 165 180 252;
+    --tw-indigo-500: 99 102 241;
+    --tw-indigo-600: 79 70 229;
+    --tw-indigo-700: 67 56 202;
+    --tw-violet-50: 245 243 255;
+    --tw-violet-100: 237 233 254;
+    --tw-violet-200: 221 214 254;
+    --tw-violet-300: 196 181 253;
+    --tw-violet-500: 139 92 246;
+    --tw-violet-600: 124 58 237;
+    --tw-violet-700: 109 40 217;
+    --tw-slate-50: 248 250 252;
+    --tw-slate-100: 241 245 249;
+    --tw-slate-200: 226 232 240;
+    --tw-slate-300: 203 213 225;
+    --tw-gray-50: 249 250 251;
+    --tw-gray-100: 243 244 246;
+    --tw-gray-200: 229 231 235;
+    --tw-gray-300: 209 213 219;
+  }
+
+  /* ── Dark mode: te same tokeny, ciemne wartości (docs/DESIGN.md) ──────
+     Klasę .dark na <html> ustawia skrypt w index.html (zero flasha)
+     i przełącznik motywu w topbarze. primary/accent bez zmian. */
+  .dark {
+    color-scheme: dark;
+    --color-canvas: 19 19 22;         /* #131316 — tło: ciemna warstwa, nie czerń */
+    --color-surface: 28 28 30;        /* #1C1C1E — karty i powierzchnie */
+    --color-surface-2: 35 35 38;      /* #232326 — hover/elevation: o stopień jaśniejsza warstwa */
+    --color-ink: 232 232 234;         /* #E8E8EA — nagłówki (bez czystej bieli) */
+    --color-ink-soft: 208 208 213;    /* #D0D0D5 — body */
+    --color-ink-muted: 152 152 158;   /* ~60% white */
+    --color-ink-faint: 109 109 115;   /* ~43% white */
+    --color-line: 46 46 50;           /* ~10% white na tle — subtelne bordery */
+    --color-primary-soft: 30 27 75;   /* #1E1B4B — tinta primary na ciemnym */
+    --color-primary-ink: 99 102 241;  /* #6366F1 — tekst na tincie / hover CTA */
+    --color-accent-soft: 22 78 99;    /* #164E63 */
+    --color-accent-ink: 34 211 238;   /* #22D3EE */
+
+    /* Avatary w dark: przygaszone (nie neonowe) */
+    --avatar-0: 70 62 198;   /* indigo-600 przygaszony */
+    --avatar-1: 5 115 172;   /* sky-600 przygaszony */
+    --avatar-2: 14 129 119;   /* teal-600 przygaszony */
+    --avatar-3: 7 130 93;   /* emerald-600 przygaszony */
+    --avatar-4: 172 96 7;   /* amber przygaszony (ciemniejszy — kontrast ≥4.5 z białym) */
+    --avatar-5: 202 78 14;   /* orange-600 przygaszony */
+    --avatar-6: 194 28 65;   /* rose-600 przygaszony */
+    --avatar-7: 108 52 205;   /* violet-600 przygaszony */
+    --avatar-8: 10 126 155;   /* cyan-600 przygaszony */
+
+    /* Ciemne tinty statusów: ~15-50% koloru na ciemnym tle (solid, żeby
+       modyfikatory /40 dalej działały); 600→jaśniejszy tekst (odcień 400),
+       700→odcień 300 */
+    --tw-red-50: 50 29 31;
+    --tw-red-100: 63 32 34;
+    --tw-red-200: 84 36 38;
+    --tw-red-300: 110 42 43;
+    --tw-red-500: 248 113 113;
+    --tw-red-600: 248 113 113;
+    --tw-red-700: 252 165 165;
+    --tw-orange-50: 51 35 26;
+    --tw-orange-100: 65 40 25;
+    --tw-orange-200: 87 49 25;
+    --tw-orange-300: 114 60 24;
+    --tw-orange-500: 251 146 60;
+    --tw-orange-600: 251 146 60;
+    --tw-orange-700: 253 186 116;
+    --tw-amber-50: 51 40 24;
+    --tw-amber-100: 64 48 23;
+    --tw-amber-200: 86 62 22;
+    --tw-amber-300: 112 78 20;
+    --tw-amber-500: 251 191 36;
+    --tw-amber-600: 251 191 36;
+    --tw-amber-700: 252 211 77;
+    --tw-emerald-50: 23 43 38;
+    --tw-emerald-100: 23 53 45;
+    --tw-emerald-200: 22 69 55;
+    --tw-emerald-300: 21 88 67;
+    --tw-emerald-500: 52 211 153;
+    --tw-emerald-600: 52 211 153;
+    --tw-emerald-700: 110 231 183;
+    --tw-teal-50: 24 43 43;
+    --tw-teal-100: 23 53 51;
+    --tw-teal-200: 23 69 65;
+    --tw-teal-300: 22 88 82;
+    --tw-teal-500: 45 212 191;
+    --tw-teal-600: 45 212 191;
+    --tw-teal-700: 94 234 212;
+    --tw-cyan-50: 22 43 48;
+    --tw-cyan-100: 21 52 59;
+    --tw-cyan-200: 19 68 78;
+    --tw-cyan-300: 17 87 100;
+    --tw-cyan-500: 34 211 238;
+    --tw-cyan-600: 34 211 238;
+    --tw-cyan-700: 103 232 249;
+    --tw-sky-50: 23 41 51;
+    --tw-sky-100: 22 49 63;
+    --tw-sky-200: 21 63 84;
+    --tw-sky-300: 20 80 109;
+    --tw-sky-500: 56 189 248;
+    --tw-sky-600: 56 189 248;
+    --tw-sky-700: 125 211 252;
+    --tw-blue-50: 28 37 52;
+    --tw-blue-100: 30 43 66;
+    --tw-blue-200: 34 54 88;
+    --tw-blue-300: 38 66 114;
+    --tw-blue-500: 96 165 250;
+    --tw-blue-600: 96 165 250;
+    --tw-blue-700: 147 197 253;
+    --tw-indigo-50: 33 33 52;
+    --tw-indigo-100: 38 38 65;
+    --tw-indigo-200: 45 46 86;
+    --tw-indigo-300: 54 55 112;
+    --tw-indigo-500: 129 140 248;
+    --tw-indigo-600: 129 140 248;
+    --tw-indigo-700: 165 180 252;
+    --tw-violet-50: 38 32 52;
+    --tw-violet-100: 45 36 66;
+    --tw-violet-200: 56 43 88;
+    --tw-violet-300: 70 51 114;
+    --tw-violet-500: 167 139 250;
+    --tw-violet-600: 167 139 250;
+    --tw-violet-700: 196 181 253;
+    --tw-slate-50: 34 34 37;
+    --tw-slate-100: 40 40 44;
+    --tw-slate-200: 48 48 53;
+    --tw-slate-300: 60 60 66;
+    --tw-gray-50: 34 34 37;
+    --tw-gray-100: 40 40 44;
+    --tw-gray-200: 48 48 53;
+    --tw-gray-300: 60 60 66;
+  }
+
+  .dark * {
+    scrollbar-color: #3F3F46 transparent;
+  }
+  .dark *::-webkit-scrollbar-thumb {
+    background-color: #3F3F46;
+  }
+  .dark *::-webkit-scrollbar-thumb:hover {
+    background-color: #52525B;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-canvas text-ink font-sans antialiased;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Refined, minimal scrollbars (Linear/Notion feel) */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #D1D5DB transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: #D1D5DB;
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: #9CA3AF;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer components {
+  /* ── Mobile (dotyk) ────────────────────────────────────────────────────────
+     Wzorce jak w Asanie/Linear mobile: pola formularzy ≥16px (iOS nie
+     przybliża), cele dotykowe ≥40px, pasek dolnej nawigacji z safe-area. */
+  @media (max-width: 767px) {
+    .input, .btn, select, input, textarea {
+      font-size: 16px;
+    }
+    .btn-primary, .btn-secondary {
+      min-height: 42px;
+    }
+    .nav-link {
+      min-height: 44px;
+    }
+  }
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  /* Miejsce na dolną nawigację mobile — main dostaje ten padding poniżej lg */
+  @media (max-width: 1023px) {
+    .with-bottom-nav {
+      padding-bottom: calc(3.75rem + env(safe-area-inset-bottom));
+    }
+  }
+
+  /* Ambientowe tło aplikacji po zalogowaniu — echo poświat z ekranu logowania
+     (primary u góry-lewej, accent u dołu-prawej). W dark wyraźniejsze
+     (granat na czerni), w light ledwie zauważalny, chłodny tint. */
+  .app-ambient {
+    background-image:
+      radial-gradient(ellipse 70% 55% at 12% -8%, rgb(var(--color-primary) / 0.08), transparent 65%),
+      radial-gradient(ellipse 60% 50% at 102% 108%, rgb(var(--color-accent) / 0.06), transparent 65%);
+  }
+  .dark .app-ambient {
+    background-image:
+      radial-gradient(ellipse 70% 55% at 12% -8%, rgb(var(--color-primary) / 0.17), transparent 65%),
+      radial-gradient(ellipse 60% 50% at 102% 108%, rgb(var(--color-accent) / 0.09), transparent 65%);
+  }
+
+  .card {
+    @apply bg-surface border border-line rounded-2xl shadow-card;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl text-sm font-semibold transition-all duration-150 disabled:opacity-50 disabled:pointer-events-none select-none;
+  }
+  .btn-primary {
+    /* CTA w primary #4F46E5 (docs/DESIGN.md: primary na głównej akcji) */
+    @apply btn bg-primary text-white px-3.5 py-2 hover:bg-primary-ink active:scale-[0.98] shadow-sm;
+  }
+  .btn-secondary {
+    @apply btn bg-surface text-ink-soft border border-line px-3.5 py-2 hover:bg-surface-2 hover:border-ink-faint/40 active:scale-[0.98];
+  }
+  .btn-ghost {
+    @apply btn text-ink-muted px-2.5 py-1.5 hover:bg-surface-2 hover:text-ink;
+  }
+
+  .input {
+    @apply w-full rounded-xl border border-line bg-surface px-3.5 py-2 text-sm text-ink placeholder:text-ink-faint outline-none transition focus:border-primary/50 focus:ring-4 focus:ring-primary/10;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition;
+  }
+
+  /* Gęsty panel administracyjny: niższe pozycje, promień „control" 8px,
+     aktywna pozycja w primary-soft zamiast ciemnej pigułki */
+  .nav-link {
+    @apply flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-ink-muted transition-all duration-150 hover:bg-surface-2 hover:text-ink;
+  }
+  .nav-link-active {
+    @apply bg-primary-soft text-primary-ink font-semibold hover:bg-primary-soft hover:text-primary-ink;
+  }
+
+  /* Labele statystyk: normalna kapitalizacja, bez trackingu (CLAUDE.md) */
+  .stat-label {
+    @apply text-xs font-medium text-ink-muted;
+  }
+
+  .section-title {
+    @apply text-sm font-semibold text-ink;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+
+  /* ── Agents panel additions (same tokens, same rhythm as Group OS) ─────── */
+  .page-title {
+    @apply text-2xl font-bold tracking-tight text-ink;
+  }
+  .page-subtitle {
+    @apply text-sm text-ink-muted mt-1;
+  }
+  .panel-head {
+    @apply flex items-center justify-between gap-3 px-4 py-3 border-b border-line;
+  }
+  .panel-body {
+    @apply p-4;
+  }
+  .row-item {
+    @apply flex items-start gap-3 px-4 py-2.5 border-b border-line last:border-0 hover:bg-surface-2 transition;
+  }
+  .stat-value {
+    @apply font-mono text-2xl font-semibold text-ink tabular-nums tracking-tight;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold;
+  }
+  .dot {
+    @apply inline-block h-2 w-2 rounded-full shrink-0;
+  }
+  .kbd {
+    @apply inline-flex items-center rounded-md border border-line bg-surface px-1.5 py-0.5 font-mono text-[10px] font-medium text-ink-faint;
+  }
+  .label {
+    @apply block text-xs font-medium text-ink-muted mb-1.5;
+  }
+  .textarea {
+    @apply input min-h-[96px] leading-relaxed;
+  }
+  .toggle {
+    @apply relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full bg-line transition;
+  }
+  .toggle::after {
+    content: '';
+    @apply absolute left-0.5 h-4 w-4 rounded-full bg-white shadow transition;
+  }
+  input:checked + .toggle {
+    @apply bg-primary;
+  }
+  input:checked + .toggle::after {
+    transform: translateX(16px);
+  }
+  input:focus-visible + .toggle {
+    @apply ring-4 ring-primary/15;
+  }
+  .tab {
+    @apply inline-flex items-center gap-2 whitespace-nowrap border-b-2 border-transparent px-1 pb-2.5 text-sm font-medium text-ink-muted hover:text-ink transition;
+  }
+  .tab-active {
+    @apply border-primary text-ink font-semibold;
+  }
+  .empty {
+    @apply px-4 py-8 text-center text-sm text-ink-faint;
+  }
+  .icon {
+    @apply h-4 w-4 shrink-0;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* Rendered report (Markdown → HTML) */
+  .prose-report {
+    @apply text-[14px] leading-relaxed text-ink-soft;
+  }
+  .prose-report h1 {
+    @apply text-xl font-bold tracking-tight text-ink mt-6 mb-2;
+  }
+  .prose-report h2 {
+    @apply text-base font-semibold text-ink mt-7 mb-2.5 pt-5 border-t border-line first:mt-0 first:pt-0 first:border-0;
+  }
+  .prose-report h3 {
+    @apply text-sm font-semibold text-ink mt-4 mb-1.5;
+  }
+  .prose-report p {
+    @apply mb-2.5;
+  }
+  .prose-report ul {
+    @apply list-disc pl-5 mb-3 space-y-1.5 marker:text-ink-faint;
+  }
+  .prose-report ol {
+    @apply list-decimal pl-5 mb-3 space-y-1.5 marker:text-ink-faint marker:font-mono;
+  }
+  .prose-report strong {
+    @apply font-semibold text-ink;
+  }
+  .prose-report a {
+    @apply text-primary-ink font-medium hover:underline;
+  }
+  .prose-report table {
+    @apply w-full text-[13px] mb-4 border-collapse;
+  }
+  .prose-report th {
+    @apply text-left font-medium text-ink-muted border-b border-line px-2 py-1.5;
+  }
+  .prose-report td {
+    @apply border-b border-line px-2 py-1.5 font-mono tabular-nums;
+  }
+  .prose-report td:first-child {
+    @apply font-sans;
+  }
+  .prose-report blockquote {
+    @apply border-l-2 border-line pl-3 text-ink-muted;
+  }
+  .prose-report code {
+    @apply font-mono text-[12px] bg-surface-2 rounded px-1;
+  }
+
+  /* Chat bubbles */
+  .bubble {
+    @apply max-w-[85%] sm:max-w-[70%] rounded-2xl px-3 py-2 text-[13.5px] leading-snug border;
+  }
+  .bubble-in {
+    @apply bg-surface border-line text-ink-soft;
+  }
+  .bubble-out {
+    @apply bg-primary-soft border-primary/20 text-ink;
+  }
+}

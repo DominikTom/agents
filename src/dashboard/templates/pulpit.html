@@ -1,0 +1,276 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, stat, panel_head, empty, avatar, importance_badge %}
+{% block title %}Pulpit{% endblock %}
+
+{% block content %}
+{% set h = now().hour %}
+<div class="mb-6 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h2 class="page-title">{{ "Dzień dobry" if h < 18 else "Dobry wieczór" }}, Dominik</h2>
+    <p class="page-subtitle">{{ today()|datepl|capitalize }}</p>
+  </div>
+  <div class="flex gap-2">
+    <button class="btn-secondary" data-run="/api/reports/morning_briefing/run" data-deliver="0"
+            data-busy="Generuję…" data-msg="Briefing się generuje (1–2 min). Pojawi się w Raportach.">
+      {{ icon("sparkles") }} Wygeneruj briefing
+    </button>
+  </div>
+</div>
+
+{# ── Alerts ── #}
+{% if not bridge.connected %}
+<a href="/sources/whatsapp" class="mb-3 flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 hover:bg-amber-100 transition">
+  <span class="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-amber-100">{{ icon("smartphone") }}</span>
+  <span class="flex-1">
+    <span class="font-semibold">WhatsApp nie jest połączony.</span>
+    {% if bridge.status == "unreachable" %}Bridge nie odpowiada.{% else %}Zeskanuj kod QR albo użyj kodu parowania, a rozmowy zaczną znów trafiać do raportów.{% endif %}
+  </span>
+  <span class="btn-primary !py-1.5 shrink-0">Połącz</span>
+</a>
+{% endif %}
+{% set missing = [] %}
+{% if not config.os %}{% set _ = missing.append("MyBed OS") %}{% endif %}
+{% if not config.dash %}{% set _ = missing.append("dash (sprzedaż)") %}{% endif %}
+{% if not config.email %}{% set _ = missing.append("wysyłka e-mail") %}{% endif %}
+{% if missing %}
+<a href="/sources" class="mb-3 flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3 text-sm text-ink-muted hover:bg-surface-2 transition">
+  <span class="text-ink-faint">{{ icon("info") }}</span>
+  <span class="flex-1">Do skonfigurowania: <span class="font-medium text-ink">{{ missing|join(", ") }}</span>. Klucze dodajesz w pliku .env — szczegóły w Źródłach danych.</span>
+  {{ icon("chevron-right", "text-ink-faint") }}
+</a>
+{% endif %}
+
+{# ── KPIs ── #}
+<div class="mt-4 mb-6 grid grid-cols-2 [&>*]:min-w-0 gap-3 lg:grid-cols-4">
+  {% if dash %}
+    {% set t = dash.total %}
+    {{ stat("Przychód · wczoraj", t.revenue|pln, "vs ten sam dzień tydz. temu", t.vs_same_weekday_pct) }}
+    {{ stat("Zamówienia · wczoraj", t.orders|num, "średnio " ~ (t.aov|pln)) }}
+    {{ stat("Tydzień do dziś", dash.week_to_date.revenue|pln, "vs poprzedni tydzień", dash.week_to_date.vs_prev_week_pct) }}
+    {{ stat("MER · 7 dni", (dash.marketing.mer_7d|string).replace(".", ",") if dash.marketing.mer_7d else "—", "wydatki " ~ (dash.marketing.platforms_covered|join("+") or "reklam") ~ " " ~ (dash.marketing.spend_7d|pln)) }}
+  {% elif erp %}
+    {{ stat("Przychód · wczoraj", erp.revenue|pln, "IdeaERP, sklepy PLN") }}
+    {{ stat("Zamówienia · wczoraj", erp.orders|num, "IdeaERP") }}
+    {{ stat("Czeka na odpowiedź", (wa_wait|length + mail_wait|length)|string, "WhatsApp + e-mail") }}
+    {{ stat("Zobowiązania", commitments_total|string, "otwarte, Twoje") }}
+  {% else %}
+    {{ stat("Czeka na odpowiedź · WhatsApp", wa_wait|length|string) }}
+    {{ stat("Czeka na odpowiedź · e-mail", mail_wait|length|string) }}
+    {{ stat("Twoje zobowiązania", commitments_total|string, href="/commitments") }}
+    {{ stat("Czekasz na innych", theirs_total|string, href="/commitments") }}
+  {% endif %}
+</div>
+
+<div class="grid grid-cols-1 gap-5 xl:grid-cols-3">
+  <div class="space-y-5 xl:col-span-2">
+
+    {# ── Latest briefing ── #}
+    {% set r = briefing if (not wrap or (briefing and briefing.generated_at > wrap.generated_at)) else wrap %}
+    <section class="card overflow-hidden">
+      {{ panel_head("Ostatni raport", href="/reports", icon_name="file-text") }}
+      {% if r %}
+      <a href="/reports/{{ r.id }}" class="block p-4 hover:bg-surface-2 transition">
+        <div class="flex items-center gap-2 text-xs text-ink-muted">
+          <span class="font-medium text-primary-ink">{{ r.title or r.agent_name }}</span>
+          <span>·</span><span>{{ r.generated_at|ago }}</span>
+        </div>
+        <p class="mt-2 text-[15px] leading-relaxed text-ink">{{ r.summary or (r.body[:280] ~ "…") }}</p>
+        <span class="mt-3 inline-flex items-center gap-1 text-sm font-medium text-primary-ink">Czytaj raport {{ icon("arrow-right", "h-3.5 w-3.5") }}</span>
+      </a>
+      {% else %}
+      {{ empty("Nie ma jeszcze raportów. Wygeneruj pierwszy briefing przyciskiem u góry.", "file-text") }}
+      {% endif %}
+    </section>
+
+    {# ── Waiting for me ── #}
+    <section class="card overflow-hidden">
+      {{ panel_head("Czeka na Twoją odpowiedź", count=(wa_wait|length + mail_wait|length), href="/chats?filter=waiting", link_label="Rozmowy", icon_name="reply") }}
+      {% if wa_wait or mail_wait %}
+      <div>
+        {% for w in wa_wait %}
+        <a href="/chats/{{ w.jid }}" class="row-item">
+          {{ avatar(w.chat_name) }}
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <span class="truncate text-sm font-semibold text-ink">{{ w.chat_name }}</span>
+              {% if w.is_group %}<span class="badge bg-surface-2 text-ink-muted">wzmianka w grupie</span>{% endif %}
+              <span class="ml-auto shrink-0 font-mono text-[11px] text-ink-faint">{{ w.waiting_since|ago }}</span>
+            </div>
+            <p class="mt-0.5 truncate text-[13px] text-ink-muted">{% if w.is_group and w.last_sender %}{{ w.last_sender }}: {% endif %}{{ w.last_body }}</p>
+            {% if w.hint %}<p class="mt-1 text-xs text-primary-ink">{{ icon("sparkles", "inline h-3 w-3 -mt-0.5") }} {{ w.hint }}</p>{% endif %}
+          </div>
+        </a>
+        {% endfor %}
+        {% for e in mail_wait %}
+        <div class="row-item">
+          <span class="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-surface-2 text-ink-muted">{{ icon("mail", "h-3.5 w-3.5") }}</span>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <span class="truncate text-sm font-semibold text-ink">{{ e.sender_display or e.metadata.sender_name or e.metadata.get("from") }}</span>
+              {% if e.priority == "high" %}<span class="badge bg-amber-50 text-amber-700">ważny</span>{% endif %}
+              <span class="ml-auto shrink-0 font-mono text-[11px] text-ink-faint">{{ e.timestamp|ago }}</span>
+            </div>
+            <p class="mt-0.5 truncate text-[13px] text-ink-muted">{{ e.title }}</p>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      {{ empty("Nikt na Ciebie nie czeka." if bridge.connected else "Brak danych z WhatsAppa — połącz go, żeby widzieć rozmowy czekające na odpowiedź.", "check") }}
+      {% endif %}
+    </section>
+
+    {# ── Important conversations ── #}
+    <section class="card overflow-hidden">
+      {{ panel_head("Ważne w rozmowach", count=important|length, href="/chats", link_label="Wszystkie rozmowy", icon_name="message-circle") }}
+      {% if important %}
+        {% for d in important %}
+        <a href="/chats/{{ d.chat_jid }}" class="row-item">
+          {{ avatar(d.chat_name) }}
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <span class="truncate text-sm font-semibold text-ink">{{ d.chat_name }}</span>
+              {{ importance_badge(d.importance) }}
+              <span class="ml-auto shrink-0 font-mono text-[11px] text-ink-faint">{{ d.last_message_at|ago }}</span>
+            </div>
+            <p class="mt-0.5 text-[13px] leading-snug text-ink-soft">{{ d.summary }}</p>
+            {% if d.open_questions %}<p class="mt-1 text-xs text-ink-muted">Otwarte: {{ d.open_questions|join("; ") }}</p>{% endif %}
+          </div>
+        </a>
+        {% endfor %}
+      {% else %}
+        {{ empty("Brak ważnych rozmów od wczoraj. Streszczenia czatów generują się co godzinę.", "message-circle") }}
+      {% endif %}
+    </section>
+  </div>
+
+  <div class="space-y-5">
+    {# ── Calendar ── #}
+    <section class="card overflow-hidden">
+      {{ panel_head("Dziś w kalendarzu", count=calendar|length, icon_name="calendar") }}
+      {% if calendar %}
+        {% for e in calendar %}
+        <div class="row-item">
+          <span class="w-12 shrink-0 pt-0.5 font-mono text-xs font-medium text-ink-muted">{{ "cały dzień" if e.metadata.all_day else e.timestamp|hm }}</span>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm font-medium text-ink">{{ e.title }}</div>
+            {% if e.metadata.location or e.metadata.hangout_link %}<div class="truncate text-xs text-ink-faint">{{ e.metadata.location or "Google Meet" }}</div>{% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        {{ empty("Brak spotkań dziś.", "calendar") }}
+      {% endif %}
+    </section>
+
+    {# ── Commitments ── #}
+    <section class="card overflow-hidden">
+      {{ panel_head("Twoje zobowiązania", count=commitments_total, href="/commitments", icon_name="square-check") }}
+      {% if commitments %}
+        {% for c in commitments %}
+        <a href="/commitments" class="row-item">
+          <span class="mt-1 h-3.5 w-3.5 shrink-0 rounded border border-ink-faint/60"></span>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm text-ink">{{ c.title }}</div>
+            <div class="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-ink-faint">
+              {% if c.counterpart %}<span>{{ c.counterpart }}</span>{% endif %}
+              {% if c.due_date %}<span class="font-mono {{ 'text-red-600' if c.due_date < today() else '' }}">do {{ c.due_date.strftime("%d.%m") }}</span>
+              {% elif c.due_hint %}<span>{{ c.due_hint }}</span>{% endif %}
+            </div>
+          </div>
+        </a>
+        {% endfor %}
+      {% else %}
+        {{ empty("Brak otwartych zobowiązań.", "square-check") }}
+      {% endif %}
+    </section>
+
+    {# ── MyBed OS ── #}
+    <section class="card overflow-hidden">
+      <div class="panel-head">
+        <div class="flex items-center gap-2"><span class="text-ink-faint">{{ icon("folder-kanban") }}</span><h2 class="section-title">MyBed OS</h2></div>
+        <a href="https://os.mybed.cloud" target="_blank" rel="noopener" class="btn-ghost !px-2 !py-1 text-xs">Otwórz {{ icon("external-link", "h-3.5 w-3.5") }}</a>
+      </div>
+      {% if os %}
+      <div class="grid grid-cols-3 divide-x divide-line border-b border-line">
+        <div class="p-3"><div class="stat-label">Zaległe</div><div class="mt-1 font-mono text-lg font-semibold {{ 'text-red-600' if os.my_overdue else 'text-ink' }}">{{ os.my_overdue }}</div></div>
+        <div class="p-3"><div class="stat-label">Na dziś</div><div class="mt-1 font-mono text-lg font-semibold text-ink">{{ os.my_today }}</div></div>
+        <div class="p-3"><div class="stat-label">Blokery</div><div class="mt-1 font-mono text-lg font-semibold text-ink">{{ os.blockers }}</div></div>
+      </div>
+      {% for t in (os_my.overdue + os_my.today)[:5] %}
+      <a href="{{ t.link }}" target="_blank" rel="noopener" class="row-item">
+        <span class="dot mt-1.5 {{ 'bg-red-500' if t.due and t.due < today().isoformat() else 'bg-amber-500' }}"></span>
+        <div class="min-w-0 flex-1">
+          <div class="truncate text-sm text-ink">{{ t.title }}</div>
+          <div class="text-xs text-ink-faint">{{ t.project or "bez projektu" }} · termin {{ t.due }}</div>
+        </div>
+      </a>
+      {% endfor %}
+      {% if os.team_overdue or os.attention %}
+      <div class="px-4 py-2.5 text-xs text-ink-muted">Zespół: <span class="font-mono font-semibold text-ink">{{ os.team_overdue }}</span> zaległych zadań · <span class="font-mono font-semibold text-ink">{{ os.attention }}</span> projektów wymaga uwagi</div>
+      {% endif %}
+      {% else %}
+      {{ empty("Połączenie z MyBed OS nie jest skonfigurowane (OS_SUPABASE_SERVICE_KEY).", "plug") }}
+      {% endif %}
+    </section>
+
+    {# ── Sales trend ── #}
+    {% if dash %}
+    <section class="card overflow-hidden">
+      {{ panel_head("Przychód · 30 dni", icon_name="trending-up") }}
+      <div class="p-4">
+        <div class="relative h-40"><canvas id="revenue-chart" aria-label="Przychód dzienny, ostatnie 30 dni" role="img"></canvas></div>
+        <div class="mt-3 space-y-1.5">
+          {% for s in dash.shops %}
+          <div class="flex items-center justify-between text-sm">
+            <span class="text-ink-muted">{{ s.shop }}</span>
+            <span class="font-mono tabular-nums text-ink">{{ s.revenue_pln|pln }}
+              {% if s.vs_same_weekday_pct is not none %}<span class="ml-1 text-xs {{ 'text-red-600' if s.vs_same_weekday_pct < -25 else 'text-ink-faint' }}">{{ s.vs_same_weekday_pct|pct }}</span>{% endif %}
+            </span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if dash %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+  const series = {{ series_json|safe }};
+  const css = (v) => `rgb(${getComputedStyle(document.documentElement).getPropertyValue(v).trim()})`;
+  let chart;
+  function draw() {
+    if (chart) chart.destroy();
+    const ctx = document.getElementById('revenue-chart');
+    const fmt = (v) => new Intl.NumberFormat('pl-PL', { maximumFractionDigits: 0 }).format(v) + ' zł';
+    chart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: series.map((s) => s.date.slice(8, 10) + '.' + s.date.slice(5, 7)),
+        datasets: [{ data: series.map((s) => s.revenue), backgroundColor: css('--color-primary'),
+          hoverBackgroundColor: css('--color-primary-ink'), borderRadius: 4, borderSkipped: 'bottom', maxBarThickness: 10 }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: false },
+          tooltip: { displayColors: false, callbacks: { label: (c) => fmt(c.parsed.y) + ' · ' + series[c.dataIndex].orders + ' zam.' } } },
+        scales: {
+          x: { grid: { display: false }, border: { display: false }, ticks: { color: css('--color-ink-faint'), maxTicksLimit: 6, font: { size: 10 } } },
+          y: { grid: { color: css('--color-line') }, border: { display: false },
+               ticks: { color: css('--color-ink-faint'), maxTicksLimit: 4, font: { size: 10 }, callback: (v) => (v / 1000) + 'k' } },
+        },
+      },
+    });
+  }
+  draw();
+  document.addEventListener('themechange', draw);
+})();
+</script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, status_dot %}
+{% block title %}Źródła danych{% endblock %}
+
+{% macro source_card(title, ic, state, lines, href=None, action=None, action_label=None, hint=None) -%}
+<section class="card flex flex-col p-4">
+  <div class="flex items-center gap-3">
+    <span class="grid h-9 w-9 place-items-center rounded-xl bg-surface-2 text-ink-muted">{{ icon(ic) }}</span>
+    <div class="min-w-0 flex-1">
+      <div class="text-sm font-semibold text-ink">{{ title }}</div>
+      <div class="flex items-center gap-1.5 text-xs text-ink-muted">{{ status_dot(state) }} {{ {"ok": "Działa", "connected": "Połączony", "stale": "Brak świeżych danych", "error": "Błąd", "empty": "Brak danych", "off": "Nie skonfigurowano"}.get(state, state) }}</div>
+    </div>
+  </div>
+  <dl class="mt-3 flex-1 space-y-1 text-xs">
+    {% for k, v in lines %}<div class="flex justify-between gap-3"><dt class="text-ink-muted">{{ k }}</dt><dd class="truncate font-mono text-ink-soft">{{ v }}</dd></div>{% endfor %}
+  </dl>
+  {% if hint %}<p class="mt-3 rounded-lg bg-canvas px-2.5 py-2 text-xs text-ink-muted">{{ hint|safe }}</p>{% endif %}
+  {% if href or action %}
+  <div class="mt-3 flex gap-2">
+    {% if href %}<a href="{{ href }}" class="btn-secondary !py-1.5 text-xs">{{ action_label or "Szczegóły" }}</a>{% endif %}
+    {% if action %}<button class="btn-ghost !py-1.5 text-xs" data-run="{{ action }}" data-msg="Uruchomiono" data-reload="4000">{{ icon("refresh-cw", "h-3.5 w-3.5") }} Synchronizuj</button>{% endif %}
+  </div>
+  {% endif %}
+</section>
+{%- endmacro %}
+
+{% block content %}
+<div class="mb-5">
+  <h2 class="page-title">Źródła danych</h2>
+  <p class="page-subtitle">Skąd agenci biorą wiedzę i czy wszystko jest aktualne.</p>
+</div>
+
+{% set hmap = {} %}{% for h in health %}{% set _ = hmap.update({h.key: h}) %}{% endfor %}
+<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+  {% set wa = hmap.whatsapp %}
+  {{ source_card("WhatsApp", "message-circle", "connected" if bridge.connected else ("error" if bridge.status in ("unreachable", "logged_out") else "stale"),
+      [("Status bridge", bridge.status), ("Ostatnia wiadomość w bazie", wa.last_event|ago if wa.last_event else "—"), ("Wiadomości / 24h", wa.last_24h)],
+      href="/sources/whatsapp", action_label=("Zarządzaj połączeniem" if bridge.connected else "Połącz WhatsApp")) }}
+
+  {% set g = hmap.gmail %}
+  {{ source_card("Gmail", "mail", g.state if config.google else "off",
+      [("Ostatni mail", g.last_event|ago if g.last_event else "—"), ("Maile / 24h", g.last_24h), ("Sync", (g.run.ran_at|ago) if g.run else "—")],
+      action="/api/jobs/gmail_sync/run", hint=(g.run.error_message if g.run and g.run.status == "error" else None)) }}
+
+  {% set c = hmap.calendar %}
+  {{ source_card("Kalendarz Google", "calendar", c.state if config.google else "off",
+      [("Wydarzeń w bazie", c.total), ("Sync", (c.run.ran_at|ago) if c.run else "—")],
+      action="/api/jobs/calendar_sync/run", hint=(c.run.error_message if c.run and c.run.status == "error" else None)) }}
+
+  {{ source_card("MyBed Group OS", "folder-kanban", "ok" if os_counts else ("error" if config.os else "off"),
+      ([("Twoje otwarte zadania", os_counts.my_open), ("Zaległe w zespole", os_counts.team_overdue), ("Aktywne blokery", os_counts.blockers)] if os_counts else [("Supabase", "mybed-group-os")]),
+      action="/api/jobs/os_people_sync/run" if config.os else None,
+      hint=None if config.os else "Dodaj <span class='font-mono'>OS_SUPABASE_SERVICE_KEY</span> do .env (Supabase → mybed-group-os → Settings → API keys → secret). Zadania, projekty, blokery i ludzie trafią do raportów zamiast Asany.") }}
+
+  {{ source_card("Dash — sprzedaż i reklamy", "shopping-cart", "ok" if dash else ("error" if config.dash else "off"),
+      ([("Dane za", dash.date), ("Przychód", dash.total.revenue|pln), ("Wydatki reklam", dash.marketing.spend_day|pln)] if dash else [("Supabase", "hurtownia danych")]),
+      hint=None if config.dash else "Dodaj <span class='font-mono'>DASH_SUPABASE_SERVICE_KEY</span> do .env. Raporty dostaną sprzedaż per sklep, MER, ROAS i showroomy.") }}
+
+  {% set erp = runs.get("ideaerp_sync") %}
+  {{ source_card("IdeaERP — dzisiejsze zamówienia", "store", ("error" if erp and erp.status == "error" else "ok") if config.ideaerp else "off",
+      [("Ostatni sync", erp.ran_at|ago if erp else "—")], action="/api/jobs/ideaerp_sync/run" if config.ideaerp else None) }}
+
+  {{ source_card("Wysyłka e-mail", "send", "ok" if config.email else "off",
+      [("Dostawca", config.email or "—")],
+      hint=None if config.email else "Dodaj <span class='font-mono'>RESEND_API_KEY</span> (to samo konto co w MyBed OS) albo dane SMTP.") }}
+
+  {{ source_card("Claude API", "sparkles", "ok" if config.anthropic else "off", [("Raporty", "Claude Opus 5"), ("Streszczenia czatów", "Claude Sonnet 5")], href="/system", action_label="Zużycie") }}
+
+  {{ source_card("Slack (opcjonalnie)", "hash", "ok" if config.slack else "off", [("Użycie", "sekcja „Slack” i wysyłka raportów")]) }}
+</div>
+{% endblock %}

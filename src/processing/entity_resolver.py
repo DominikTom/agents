@@ -82,7 +82,6 @@ class EntityResolver:
           karolina:
             display_name: Karolina
             role: operations
-            asana_name: "Karolina Kowalska"
             slack_name: "Karolina Kowalska"
             whatsapp_name: "Karolina"
             email_patterns: ["karolina@mybed.pl"]
@@ -111,7 +110,6 @@ class EntityResolver:
 
             # Create aliases for each source
             source_mappings = {
-                "asana": person.get("asana_name"),
                 "slack": person.get("slack_name"),
                 "whatsapp": person.get("whatsapp_name"),
                 "gmail": person.get("gmail_name"),
@@ -131,7 +129,7 @@ class EntityResolver:
                 await self.db.upsert_alias(entity_id, "gmail", pattern)
 
             # External IDs
-            for source_key in ["asana_id", "slack_id"]:
+            for source_key in ["slack_id"]:
                 ext_id = person.get(source_key)
                 if ext_id:
                     source = source_key.replace("_id", "")

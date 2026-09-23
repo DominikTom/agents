@@ -1,58 +1,65 @@
 {% extends "base.html" %}
-{% set active = "reports" %}
+{% from "_macros.html" import icon, empty %}
 {% block title %}Raporty{% endblock %}
 
 {% block content %}
-<div class="flex items-center justify-between mb-6">
-    <h2 class="text-2xl font-bold text-gray-900">Raporty</h2>
-    <div class="flex gap-2">
-        <a href="/reports" class="px-3 py-1.5 rounded-lg text-sm {% if not agent_filter %}bg-blue-600 text-white{% else %}bg-gray-200 text-gray-700 hover:bg-gray-300{% endif %}">
-            Wszystkie
-        </a>
-        <a href="/reports?agent=morning_briefing" class="px-3 py-1.5 rounded-lg text-sm {% if agent_filter == 'morning_briefing' %}bg-blue-600 text-white{% else %}bg-gray-200 text-gray-700 hover:bg-gray-300{% endif %}">
-            ☀️ Briefing
-        </a>
-        <a href="/reports?agent=task_monitor" class="px-3 py-1.5 rounded-lg text-sm {% if agent_filter == 'task_monitor' %}bg-blue-600 text-white{% else %}bg-gray-200 text-gray-700 hover:bg-gray-300{% endif %}">
-            📊 Monitor
-        </a>
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h2 class="page-title">Raporty</h2>
+    <p class="page-subtitle">Poranny briefing, podsumowanie dnia i tygodnia. Zakres, godziny i adresatów ustawisz w Studio.</p>
+  </div>
+  <div class="relative" data-dropdown>
+    <button class="btn-primary" data-dropdown-trigger>{{ icon("sparkles") }} Wygeneruj teraz {{ icon("chevron-down", "h-3.5 w-3.5 opacity-70") }}</button>
+    <div data-dropdown-menu class="absolute right-0 top-11 z-50 hidden w-72 animate-scale-in rounded-2xl border border-line bg-surface p-1 shadow-pop">
+      {% for key, label in labels.items() %}
+      <button class="nav-link w-full !items-start !py-2" data-run="/api/reports/{{ key }}/run" data-deliver="0" data-busy="Uruchamiam…"
+              data-msg="{{ label }} generuje się w tle (1–2 min)." data-reload="90000">
+        <span class="mt-0.5 text-ink-faint">{{ icon("file-text") }}</span>
+        <span class="text-left"><span class="block text-ink">{{ label }}</span><span class="block text-[11px] font-normal text-ink-faint">Tylko do panelu, bez wysyłki e-mail</span></span>
+      </button>
+      {% endfor %}
     </div>
+  </div>
 </div>
 
-{% if reports %}
-<div class="space-y-4">
-    {% for report in reports %}
-    <a href="/reports/{{ report.id }}" class="block bg-white rounded-xl shadow-sm border p-5 hover:shadow-md transition">
-        <div class="flex items-center justify-between mb-2">
-            <span class="font-semibold">
-                {% if report.agent_name == 'morning_briefing' %}☀️ Morning Briefing{% else %}📊 Task Monitor{% endif %}
-            </span>
-            <span class="text-gray-500 text-sm">{{ report.generated_at }}</span>
+<div class="mb-4 flex gap-5 overflow-x-auto border-b border-line scrollbar-hide">
+  <a href="/reports" class="tab {{ 'tab-active' if not kind }}">Wszystkie</a>
+  {% for key, label in labels.items() %}
+  <a href="/reports?kind={{ key }}" class="tab {{ 'tab-active' if kind == key }}">{{ label }}
+    {% if runs.get(key) and runs[key].status == "error" %}<span class="dot bg-red-500" title="Ostatnie uruchomienie nie powiodło się"></span>{% endif %}
+  </a>
+  {% endfor %}
+</div>
+
+<section class="card overflow-hidden">
+  {% if reports %}
+    {% for r in reports %}
+    <a href="/reports/{{ r.id }}" class="row-item !py-3.5">
+      <span class="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-primary-soft text-primary-ink">
+        {{ icon({"morning_briefing": "sun", "daily_wrap": "clock", "weekly_review": "calendar"}.get(r.agent_name, "file-text")) }}
+      </span>
+      <div class="min-w-0 flex-1">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-sm font-semibold text-ink">{{ r.title or labels.get(r.agent_name, r.agent_name) }}</span>
+          {% if r.meta_d.preview %}<span class="badge bg-surface-2 text-ink-muted">podgląd</span>{% endif %}
+          {% if r.meta_d.delivered and r.meta_d.delivered.email %}<span class="badge bg-emerald-50 text-emerald-700">{{ icon("mail", "h-3 w-3") }} wysłany</span>{% endif %}
+          {% if r.sources_failed %}<span class="badge bg-amber-50 text-amber-700" title="{{ r.sources_failed }}">niepełne dane</span>{% endif %}
+          <span class="ml-auto shrink-0 font-mono text-[11px] text-ink-faint">{{ r.generated_at|short }}</span>
         </div>
-        <p class="text-gray-600 text-sm">{{ report.summary[:200] }}</p>
-        {% if report.sources_failed %}
-        <div class="mt-2">
-            <span class="text-xs text-red-600">Niedostępne: {{ report.sources_failed }}</span>
-        </div>
-        {% endif %}
+        <p class="mt-1 line-clamp-2 text-[13px] leading-snug text-ink-muted">{{ r.summary }}</p>
+      </div>
     </a>
     {% endfor %}
-</div>
+  {% else %}
+    {{ empty("Brak raportów w tej kategorii.", "file-text") }}
+  {% endif %}
+</section>
 
-<!-- Pagination -->
-<div class="flex justify-center gap-2 mt-6">
-    {% if current_page > 1 %}
-    <a href="/reports?page={{ current_page - 1 }}{% if agent_filter %}&agent={{ agent_filter }}{% endif %}"
-        class="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 text-sm">← Poprzednia</a>
-    {% endif %}
-    <span class="px-4 py-2 text-gray-600 text-sm">Strona {{ current_page }} z {{ total_pages }}</span>
-    {% if current_page < total_pages %}
-    <a href="/reports?page={{ current_page + 1 }}{% if agent_filter %}&agent={{ agent_filter }}{% endif %}"
-        class="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 text-sm">Następna →</a>
-    {% endif %}
-</div>
-{% else %}
-<div class="bg-white rounded-xl shadow-sm border p-8 text-center">
-    <p class="text-gray-500">Brak raportów do wyświetlenia.</p>
+{% if pages > 1 %}
+<div class="mt-4 flex items-center justify-center gap-2">
+  {% if page > 1 %}<a class="btn-secondary" href="?{{ 'kind=' ~ kind ~ '&' if kind }}page={{ page - 1 }}">{{ icon("chevron-left") }} Nowsze</a>{% endif %}
+  <span class="font-mono text-xs text-ink-muted">{{ page }} / {{ pages }}</span>
+  {% if page < pages %}<a class="btn-secondary" href="?{{ 'kind=' ~ kind ~ '&' if kind }}page={{ page + 1 }}">Starsze {{ icon("chevron-right") }}</a>{% endif %}
 </div>
 {% endif %}
 {% endblock %}

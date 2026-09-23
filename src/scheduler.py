@@ -1,4 +1,4 @@
-"""APScheduler setup - registers cron jobs for all agents."""
+"""APScheduler setup — ingestion jobs + report schedules from the Studio settings."""
 
 from __future__ import annotations
 
@@ -7,274 +7,74 @@ import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from src.ai.client import AIClient
-from src.common.config import load_config, get_env
-from src.outputs.slack_output import SlackOutput
+from src import jobs
 from src.storage.database import Database
 
 logger = logging.getLogger(__name__)
 
+TZ = "Europe/Warsaw"
 
-async def _init_db_and_run(agent_cls, config: dict) -> None:
-    """Generic job runner: init DB, create agent, run, cleanup."""
-    db = Database()
-    await db.init(run_schema=False)
-    try:
-        ai_client = AIClient()
-        slack_output = SlackOutput(config)
-        agent = agent_cls(
-            config=config, ai_client=ai_client, outputs=[slack_output], db=db
-        )
-        await agent.run()
-    finally:
-        await db.close()
+# job -> cron (minute hour day month dow); overridable in config/agents.yaml
+DEFAULT_CRONS = {
+    "whatsapp_sync": "*/5 * * * *",
+    "gmail_sync": "*/10 * * * *",
+    "calendar_sync": "*/30 * * * *",
+    "ideaerp_sync": "5 * * * *",
+    "os_people_sync": "15 */6 * * *",
+    "chat_digests": "20 8-20 * * *",
+    "topic_extraction": "40 15 * * mon-fri",
+}
 
 
-async def run_morning_briefing(config: dict) -> None:
-    from src.agents.morning_briefing import MorningBriefingAgent
-    await _init_db_and_run(MorningBriefingAgent, config)
+def _cron(expr: str) -> CronTrigger:
+    minute, hour, day, month, dow = expr.split()
+    return CronTrigger(minute=minute, hour=hour, day=day, month=month, day_of_week=dow, timezone=TZ)
 
 
-async def run_task_monitor(config: dict) -> None:
-    from src.agents.task_monitor import TaskMonitorAgent
-    await _init_db_and_run(TaskMonitorAgent, config)
+def _dow(days: list[int]) -> str:
+    return ",".join(str(d) for d in sorted(set(days))) or "0-6"
 
 
-async def run_daily_wrap(config: dict) -> None:
-    from src.agents.daily_wrap import DailyWrapAgent
-    await _init_db_and_run(DailyWrapAgent, config)
+class AgentsScheduler:
+    def __init__(self, config: dict):
+        self.config = config
+        self.scheduler = AsyncIOScheduler(timezone=TZ)
+        self._fingerprint = None
 
+    def start(self) -> None:
+        overrides = self.config.get("agents", {}).get("jobs", {})
+        for name, (label, fn) in jobs.JOBS.items():
+            expr = overrides.get(name, DEFAULT_CRONS[name])
+            self.scheduler.add_job(fn, trigger=_cron(expr), id=name, name=label, replace_existing=True,
+                                   max_instances=1, coalesce=True, misfire_grace_time=300)
+            logger.info(f"Scheduled {name}: {expr}")
+        self.scheduler.add_job(self.reload_reports, "interval", minutes=1, id="_reload_reports",
+                               max_instances=1, coalesce=True)
+        self.scheduler.start()
 
-async def run_topic_extraction(config: dict) -> None:
-    """Extract cross-source business topics from recent events."""
-    from src.ingestion.topic_extractor import TopicExtractor
-    from src.ai.client import AIClient
+    async def reload_reports(self) -> None:
+        """(Re)register report jobs when their settings change in the panel."""
+        from src.reports.profiles import load_profiles
 
-    db = Database()
-    await db.init(run_schema=False)
-    try:
-        extractor = TopicExtractor(db, AIClient())
-        await extractor.extract(lookback_hours=24)
-    except Exception as e:
-        logger.error(f"Topic extraction failed: {e}")
-    finally:
-        await db.close()
-
-
-async def run_whatsapp_sync(config: dict) -> None:
-    """Sync WhatsApp messages from bridge to PostgreSQL."""
-    from src.ingestion.whatsapp_ingest import WhatsAppIngestor
-
-    db = Database()
-    await db.init(run_schema=False)
-    try:
-        bridge_url = get_env("WHATSAPP_BRIDGE_URL")
-        ingestor = WhatsAppIngestor(db, bridge_url)
-        await ingestor.sync()
-    except Exception as e:
-        logger.error(f"WhatsApp sync failed: {e}")
-    finally:
-        await db.close()
-
-
-async def run_gmail_sync(config: dict) -> None:
-    """Sync Gmail emails to PostgreSQL events table."""
-    from src.ingestion.gmail_ingest import GmailIngestor
-
-    db = Database()
-    await db.init(run_schema=False)
-    try:
-        ingestor = GmailIngestor(db)
-        await ingestor.sync(lookback_hours=1)
-    except Exception as e:
-        logger.error(f"Gmail sync failed: {e}")
-    finally:
-        await db.close()
-
-
-async def run_calendar_sync(config: dict) -> None:
-    """Sync Google Calendar events to PostgreSQL events table."""
-    from src.ingestion.calendar_ingest import CalendarIngestor
-
-    db = Database()
-    await db.init(run_schema=False)
-    try:
-        ingestor = CalendarIngestor(db, config)
-        await ingestor.sync(days_ahead=2)
-    except Exception as e:
-        logger.error(f"Calendar sync failed: {e}")
-    finally:
-        await db.close()
-
-
-async def run_asana_sync(config: dict) -> None:
-    """Sync Asana tasks to PostgreSQL events table."""
-    from src.ingestion.asana_ingest import AsanaIngestor
-
-    db = Database()
-    await db.init(run_schema=False)
-    try:
-        ingestor = AsanaIngestor(db, config)
-        await ingestor.sync()
-    except Exception as e:
-        logger.error(f"Asana sync failed: {e}")
-    finally:
-        await db.close()
-
-
-async def run_ideaerp_metrics(config: dict) -> None:
-    """Sync IdeaERP order metrics to business_metrics table."""
-    from src.ingestion.ideaerp_ingest import IdeaERPMetricsIngestor
-
-    db = Database()
-    await db.init(run_schema=False)
-    try:
-        ingestor = IdeaERPMetricsIngestor(db, config)
-        await ingestor.sync()
-    except Exception as e:
-        logger.error(f"IdeaERP metrics sync failed: {e}")
-    finally:
-        await db.close()
-
-
-def _parse_cron(cron_expr: str) -> dict:
-    parts = cron_expr.split()
-    return {
-        "minute": parts[0],
-        "hour": parts[1],
-        "day": parts[2],
-        "month": parts[3],
-        "day_of_week": parts[4],
-    }
-
-
-async def create_scheduler(config: dict) -> AsyncIOScheduler:
-    """Create and configure the scheduler with all agent jobs."""
-    # Seed entities on startup
-    from src.main import init_system
-    db, resolver = await init_system(config)
-    await db.close()
-
-    agents_config = config.get("agents", {})
-    timezone = agents_config.get("timezone", "Europe/Warsaw")
-
-    scheduler = AsyncIOScheduler(timezone=timezone)
-
-    # Morning Briefing
-    briefing_config = agents_config.get("morning_briefing", {})
-    briefing_cron = briefing_config.get("schedule", "0 7 * * 1-5")
-    scheduler.add_job(
-        run_morning_briefing,
-        trigger=CronTrigger(**_parse_cron(briefing_cron), timezone=timezone),
-        args=[config],
-        id="morning_briefing",
-        name="Morning Briefing",
-        replace_existing=True,
-    )
-    logger.info(f"Scheduled morning_briefing: {briefing_cron} ({timezone})")
-
-    # Task Monitor
-    monitor_config = agents_config.get("task_monitor", {})
-    monitor_cron = monitor_config.get("schedule", "0 9,16 * * 1-5")
-    scheduler.add_job(
-        run_task_monitor,
-        trigger=CronTrigger(**_parse_cron(monitor_cron), timezone=timezone),
-        args=[config],
-        id="task_monitor",
-        name="Task Monitor",
-        replace_existing=True,
-    )
-    logger.info(f"Scheduled task_monitor: {monitor_cron} ({timezone})")
-
-    # Daily Wrap (afternoon summary + tomorrow plan)
-    wrap_config = agents_config.get("daily_wrap", {})
-    wrap_cron = wrap_config.get("schedule", "0 16 * * 1-5")
-    scheduler.add_job(
-        run_daily_wrap,
-        trigger=CronTrigger(**_parse_cron(wrap_cron), timezone=timezone),
-        args=[config],
-        id="daily_wrap",
-        name="Daily Wrap",
-        replace_existing=True,
-    )
-    logger.info(f"Scheduled daily_wrap: {wrap_cron} ({timezone})")
-
-    # Topic Extraction - before daily wrap
-    topic_config = agents_config.get("topic_extraction", {})
-    topic_cron = topic_config.get("schedule", "45 15 * * 1-5")
-    scheduler.add_job(
-        run_topic_extraction,
-        trigger=CronTrigger(**_parse_cron(topic_cron), timezone=timezone),
-        args=[config],
-        id="topic_extraction",
-        name="Topic Extraction",
-        replace_existing=True,
-    )
-    logger.info(f"Scheduled topic_extraction: {topic_cron} ({timezone})")
-
-    # WhatsApp Sync - every 5 minutes
-    wa_config = agents_config.get("whatsapp_sync", {})
-    wa_cron = wa_config.get("schedule", "*/5 * * * *")
-    scheduler.add_job(
-        run_whatsapp_sync,
-        trigger=CronTrigger(**_parse_cron(wa_cron), timezone=timezone),
-        args=[config],
-        id="whatsapp_sync",
-        name="WhatsApp Sync",
-        replace_existing=True,
-    )
-    logger.info(f"Scheduled whatsapp_sync: {wa_cron} ({timezone})")
-
-    # Gmail Sync - every 15 minutes
-    gmail_config = agents_config.get("gmail_sync", {})
-    gmail_cron = gmail_config.get("schedule", "*/15 * * * *")
-    scheduler.add_job(
-        run_gmail_sync,
-        trigger=CronTrigger(**_parse_cron(gmail_cron), timezone=timezone),
-        args=[config],
-        id="gmail_sync",
-        name="Gmail Sync",
-        replace_existing=True,
-    )
-    logger.info(f"Scheduled gmail_sync: {gmail_cron} ({timezone})")
-
-    # Calendar Sync - every 30 minutes
-    cal_config = agents_config.get("calendar_sync", {})
-    cal_cron = cal_config.get("schedule", "*/30 * * * *")
-    scheduler.add_job(
-        run_calendar_sync,
-        trigger=CronTrigger(**_parse_cron(cal_cron), timezone=timezone),
-        args=[config],
-        id="calendar_sync",
-        name="Calendar Sync",
-        replace_existing=True,
-    )
-    logger.info(f"Scheduled calendar_sync: {cal_cron} ({timezone})")
-
-    # Asana Sync - every 15 minutes
-    asana_config = agents_config.get("asana_sync", {})
-    asana_cron = asana_config.get("schedule", "*/15 * * * *")
-    scheduler.add_job(
-        run_asana_sync,
-        trigger=CronTrigger(**_parse_cron(asana_cron), timezone=timezone),
-        args=[config],
-        id="asana_sync",
-        name="Asana Sync",
-        replace_existing=True,
-    )
-    logger.info(f"Scheduled asana_sync: {asana_cron} ({timezone})")
-
-    # IdeaERP Metrics - every hour
-    erp_config = agents_config.get("ideaerp_metrics", {})
-    erp_cron = erp_config.get("schedule", "0 * * * *")
-    scheduler.add_job(
-        run_ideaerp_metrics,
-        trigger=CronTrigger(**_parse_cron(erp_cron), timezone=timezone),
-        args=[config],
-        id="ideaerp_metrics",
-        name="IdeaERP Metrics",
-        replace_existing=True,
-    )
-    logger.info(f"Scheduled ideaerp_metrics: {erp_cron} ({timezone})")
-
-    return scheduler
+        db = Database()
+        await db.init(run_schema=False)
+        try:
+            fp = await db.settings_fingerprint()
+            if fp == self._fingerprint:
+                return
+            profiles = await load_profiles(db)
+        finally:
+            await db.close()
+        self._fingerprint = fp
+        for key, p in profiles.items():
+            job_id = f"report:{key}"
+            if self.scheduler.get_job(job_id):
+                self.scheduler.remove_job(job_id)
+            if not p.get("enabled") or not p.get("days"):
+                logger.info(f"Report {key}: disabled")
+                continue
+            hour, minute = (p.get("time") or "07:00").split(":")
+            trigger = CronTrigger(hour=int(hour), minute=int(minute), day_of_week=_dow(p["days"]), timezone=TZ)
+            self.scheduler.add_job(jobs.run_report, trigger=trigger, args=[key], id=job_id, name=p.get("name", key),
+                                   max_instances=1, coalesce=True, misfire_grace_time=1800)
+            logger.info(f"Report {key}: {p.get('time')} dow={_dow(p['days'])}")

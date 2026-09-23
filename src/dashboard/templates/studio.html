@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+{% block title %}Studio raportów{% endblock %}
+
+{% block content %}
+<div class="mb-5">
+  <h2 class="page-title">Studio raportów</h2>
+  <p class="page-subtitle">Decydujesz, co jest w raportach, w jakiej kolejności, jak długie mają być i kiedy przychodzą. Zmiany działają od następnego raportu.</p>
+</div>
+
+<div class="mb-5 flex gap-5 overflow-x-auto border-b border-line scrollbar-hide">
+  {% for k, p in profiles.items() %}
+  <a href="/studio/{{ k }}" class="tab {{ 'tab-active' if key == k }}">
+    <span class="dot {{ 'bg-emerald-500' if p.enabled else 'bg-slate-300' }}"></span>{{ p.name }}
+  </a>
+  {% endfor %}
+  <a href="/studio/general" class="tab {{ 'tab-active' if key == 'general' }}">{{ icon("user-round") }} O mnie i ustawienia</a>
+</div>
+
+{% if saved %}
+<div class="mb-4 flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-700">{{ icon("circle-check") }} Zapisano.</div>
+{% endif %}
+
+{% if key == "general" %}
+{# ───────────────────────── General ───────────────────────── #}
+<form method="post" action="/studio/general" class="grid grid-cols-1 gap-5 lg:grid-cols-3">
+  <div class="space-y-5 lg:col-span-2">
+    <section class="card p-5 space-y-4">
+      <div>
+        <h3 class="section-title">O mnie i moje priorytety</h3>
+        <p class="mt-1 text-xs text-ink-muted">AI czyta to przed każdym raportem. Napisz, co jest teraz najważniejsze, na czym się skupiasz, czego nie chcesz widzieć. Im konkretniej, tym trafniejsze raporty.</p>
+      </div>
+      <textarea name="about" rows="8" class="textarea" placeholder="Np. W tym kwartale priorytetem jest wejście MyBed na rynek DE i marża na MittoHome. Nie raportuj drobnej logistyki showroomów…">{{ general.about }}</textarea>
+    </section>
+
+    <section class="card p-5 space-y-4">
+      <div>
+        <h3 class="section-title">Osoby i czaty VIP</h3>
+        <p class="mt-1 text-xs text-ink-muted">Ich sprawy zawsze trafiają wyżej w raporcie. Jedna osoba lub nazwa czatu w linii.</p>
+      </div>
+      <textarea name="vip" rows="5" class="textarea font-mono text-[13px]" placeholder="Maciej Żydziak&#10;Zarząd MyBed">{{ general.vip|join("\n") }}</textarea>
+    </section>
+  </div>
+
+  <div class="space-y-5">
+    <section class="card p-5 space-y-4">
+      <h3 class="section-title">Domyślni adresaci e-mail</h3>
+      <input name="recipients" class="input" value="{{ general.recipients|join(', ') }}" placeholder="dominik.tomaszczyk@mybed.pl">
+      <p class="text-xs text-ink-muted">Używani, gdy raport nie ma własnej listy. Kilka adresów oddziel przecinkiem.</p>
+      {% if not config.email %}<p class="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">Wysyłka e-mail nie jest skonfigurowana: dodaj <span class="font-mono">RESEND_API_KEY</span> (ten sam co w MyBed OS) albo SMTP w .env.</p>{% endif %}
+    </section>
+
+    <section class="card p-5 space-y-3">
+      <h3 class="section-title">Zobowiązania → MyBed OS</h3>
+      <p class="text-xs text-ink-muted">W Zobowiązaniach zatwierdzasz każdą pozycję osobno. „Dodaj do OS” tworzy <b>prywatne zadanie</b> przypisane do Ciebie, widoczne tylko dla Ciebie.</p>
+      <label class="flex items-start gap-3">
+        <input type="checkbox" name="push_to_os_suggestions" class="peer sr-only" {{ 'checked' if general.push_to_os_suggestions }}>
+        <span class="toggle mt-0.5"></span>
+        <span class="text-sm text-ink-soft">Pozwól też wysyłać je jako <b>Propozycje AI</b> w OS
+          <span class="mt-1 block text-xs text-amber-700">Uwaga: propozycje AI w OS widzi cały zespół w swojej Skrzynce (brak ograniczeń widoczności w bazie OS).</span>
+        </span>
+      </label>
+    </section>
+    <button class="btn-primary w-full">{{ icon("check") }} Zapisz ustawienia</button>
+  </div>
+</form>
+
+{% else %}
+{# ───────────────────────── Report profile ───────────────────────── #}
+<form id="studio-form" method="post" action="/studio/{{ key }}" class="grid grid-cols-1 gap-5 xl:grid-cols-5">
+  <div class="space-y-5 xl:col-span-3">
+
+    <section class="card p-5">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <label class="flex items-center gap-3">
+          <input type="checkbox" name="enabled" class="peer sr-only" {{ 'checked' if profile.enabled }}>
+          <span class="toggle"></span>
+          <span class="text-sm font-semibold text-ink">Raport włączony</span>
+        </label>
+        <span class="text-xs text-ink-muted">{{ schedule_label(profile) }}{% if last %} · ostatni {{ last.generated_at|ago }}{% endif %}</span>
+      </div>
+
+      <div class="mt-5 grid gap-4 sm:grid-cols-2">
+        <div>
+          <label class="label">Nazwa</label>
+          <input name="name" class="input" value="{{ profile.name }}">
+        </div>
+        <div>
+          <label class="label">Godzina</label>
+          <input name="time" type="time" class="input font-mono" value="{{ profile.time }}">
+        </div>
+        <div class="sm:col-span-2">
+          <label class="label">Dni</label>
+          <div class="flex flex-wrap gap-1.5">
+            {% for d in range(7) %}
+            <label>
+              <input type="checkbox" name="days" value="{{ d }}" class="peer sr-only" {{ 'checked' if d in profile.days }}>
+              <span class="chip cursor-pointer border-line text-ink-muted peer-checked:border-primary/40 peer-checked:bg-primary-soft peer-checked:text-primary-ink">{{ day_names[d] }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card overflow-hidden">
+      <div class="panel-head">
+        <div>
+          <h3 class="section-title">Sekcje</h3>
+          <p class="mt-0.5 text-xs text-ink-muted">Włącz, ustaw kolejność strzałkami i dopisz własne wskazówki do sekcji.</p>
+        </div>
+        <span class="badge bg-surface-2 font-mono text-ink-muted" id="sec-count"></span>
+      </div>
+      <input type="hidden" name="order" id="order">
+      <ul id="sections">
+        {% for s in profile.sections %}
+        {% set cat = catalog[s.key] %}
+        <li class="border-b border-line last:border-0" data-key="{{ s.key }}">
+          <div class="flex items-start gap-3 px-4 py-3">
+            <label class="mt-0.5">
+              <input type="checkbox" name="sec_{{ s.key }}" class="peer sr-only" {{ 'checked' if s.enabled }} onchange="countSections()">
+              <span class="toggle"></span>
+            </label>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-medium text-ink">{{ cat.label }}</span>
+                {% if not cat.data %}<span class="badge bg-violet-50 text-violet-700">synteza AI</span>{% endif %}
+                {% if s.note %}<span class="badge bg-primary-soft text-primary-ink">Twoja wskazówka</span>{% endif %}
+              </div>
+              <p class="mt-0.5 text-xs text-ink-muted">{{ cat.description }}</p>
+              <details class="mt-1.5" {{ 'open' if s.note }}>
+                <summary class="cursor-pointer select-none text-xs font-medium text-ink-faint hover:text-ink-muted">Wskazówka do tej sekcji</summary>
+                <input name="note_{{ s.key }}" class="input mt-2 !py-1.5 text-[13px]" value="{{ s.note }}" placeholder="Np. pokaż też porównanie do średniej z 4 tygodni">
+              </details>
+            </div>
+            <div class="flex shrink-0 flex-col max-lg:flex-row">
+              <button type="button" class="btn-ghost !p-1.5" onclick="move(this, -1)" aria-label="W górę">{{ icon("arrow-up", "h-3.5 w-3.5") }}</button>
+              <button type="button" class="btn-ghost !p-1.5" onclick="move(this, 1)" aria-label="W dół">{{ icon("arrow-down", "h-3.5 w-3.5") }}</button>
+            </div>
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section class="card p-5 space-y-3">
+      <div>
+        <h3 class="section-title">Twoje instrukcje do tego raportu</h3>
+        <p class="mt-1 text-xs text-ink-muted">Styl, ton, na co zwracać uwagę. Mają pierwszeństwo przed domyślnymi zasadami.</p>
+      </div>
+      <textarea name="instructions" rows="4" class="textarea" placeholder="Np. Zaczynaj od liczb. Pisz bardziej bezpośrednio. Jeśli ktoś z zarządu czeka na mnie dłużej niż 4 godziny — daj to na samą górę.">{{ profile.instructions }}</textarea>
+    </section>
+  </div>
+
+  <div class="space-y-5 xl:col-span-2">
+    <section class="card p-5 space-y-4">
+      <h3 class="section-title">Styl i model</h3>
+      <div>
+        <label class="label">Długość</label>
+        <div class="grid grid-cols-3 gap-1.5">
+          {% for k, lbl in [("short", "Krótki"), ("standard", "Standard"), ("detailed", "Szczegółowy")] %}
+          <label>
+            <input type="radio" name="length" value="{{ k }}" class="peer sr-only" {{ 'checked' if profile.length == k }}>
+            <span class="btn-secondary w-full cursor-pointer peer-checked:border-primary/40 peer-checked:bg-primary-soft peer-checked:text-primary-ink">{{ lbl }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+      <div>
+        <label class="label">Model AI</label>
+        <select name="model" class="input">
+          {% for m in models %}<option value="{{ m.id }}" {{ 'selected' if profile.model == m.id }}>{{ m.label }} — {{ m.hint }}</option>{% endfor %}
+        </select>
+      </div>
+    </section>
+
+    <section class="card p-5 space-y-4">
+      <h3 class="section-title">Dostarczanie</h3>
+      <label class="flex items-center gap-3">
+        <input type="checkbox" name="email" class="peer sr-only" {{ 'checked' if profile.email }}>
+        <span class="toggle"></span>
+        <span class="text-sm text-ink-soft">Wyślij e-mailem</span>
+      </label>
+      <div>
+        <label class="label">Adresaci (puste = domyślni z „O mnie i ustawienia”)</label>
+        <input name="recipients" class="input" value="{{ (profile.recipients or [])|join(', ') }}" placeholder="{{ general.recipients|join(', ') }}">
+      </div>
+      <div>
+        <label class="label">Kanał Slack (opcjonalnie)</label>
+        <input name="slack_channel" class="input font-mono" value="{{ profile.slack_channel }}" placeholder="#morning-briefing">
+      </div>
+      {% if not config.email %}<p class="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">E-mail nie jest skonfigurowany — raporty zostaną tylko w panelu.</p>{% endif %}
+    </section>
+
+    <div class="flex gap-2">
+      <button class="btn-primary flex-1">{{ icon("check") }} Zapisz</button>
+      <button type="button" id="preview-btn" class="btn-secondary flex-1" onclick="preview()">{{ icon("eye") }} Podgląd</button>
+    </div>
+    <p class="text-xs text-ink-faint">Podgląd generuje raport z bieżących ustawień (bez zapisywania i bez wysyłki). Trwa 1–2 minuty.</p>
+
+    <section id="preview-box" class="card hidden overflow-hidden">
+      <div class="panel-head"><h3 class="section-title">Podgląd</h3><a id="preview-link" class="btn-ghost !px-2 !py-1 text-xs" href="#">Otwórz {{ icon("external-link", "h-3.5 w-3.5") }}</a></div>
+      <div class="max-h-[70vh] overflow-y-auto p-5">
+        <p id="preview-lead" class="mb-4 rounded-xl bg-primary-soft px-3 py-2.5 text-sm text-ink"></p>
+        <div id="preview-body" class="prose-report"></div>
+      </div>
+    </section>
+  </div>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function move(btn, dir) {
+  const li = btn.closest('li')
+  const target = dir < 0 ? li.previousElementSibling : li.nextElementSibling
+  if (!target) return
+  dir < 0 ? li.parentNode.insertBefore(li, target) : li.parentNode.insertBefore(target, li)
+  syncOrder()
+}
+function syncOrder() {
+  const order = document.getElementById('order')
+  if (order) order.value = [...document.querySelectorAll('#sections li')].map((li) => li.dataset.key).join(',')
+}
+function countSections() {
+  const el = document.getElementById('sec-count')
+  if (el) el.textContent = document.querySelectorAll('#sections input[type=checkbox]:checked').length + ' włączonych'
+}
+syncOrder(); countSections()
+
+async function preview() {
+  const btn = document.getElementById('preview-btn')
+  syncOrder()
+  busy(btn, true, 'Generuję…')
+  try {
+    const res = await post('/api/studio/{{ key }}/preview', new FormData(document.getElementById('studio-form')))
+    document.getElementById('preview-box').classList.remove('hidden')
+    document.getElementById('preview-lead').textContent = res.lead || ''
+    document.getElementById('preview-body').innerHTML = res.html
+    document.getElementById('preview-link').href = '/reports/' + res.id
+    document.getElementById('preview-box').scrollIntoView({ behavior: 'smooth', block: 'start' })
+    if (Object.keys(res.errors || {}).length) toast('Część źródeł była niedostępna: ' + Object.keys(res.errors).join(', '), 'error')
+  } catch (e) {
+    toast(e.message, 'error')
+  } finally {
+    busy(btn, false)
+  }
+}
+</script>
+{% endblock %}

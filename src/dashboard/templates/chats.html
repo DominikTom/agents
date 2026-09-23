@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, avatar, empty, importance_badge %}
+{% block title %}Rozmowy{% endblock %}
+
+{% block content %}
+{% if not bridge.connected %}
+<a href="/sources/whatsapp" class="mb-4 flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700 hover:bg-amber-100 transition">
+  {{ icon("smartphone") }}<span class="flex-1"><b>WhatsApp nie jest połączony</b> — pokazuję historię zapisaną w bazie.</span><span class="font-semibold">Połącz →</span>
+</a>
+{% endif %}
+
+<div class="grid grid-cols-1 gap-5 lg:grid-cols-[340px_1fr]">
+  {# ── Chat list ── #}
+  <section class="card flex flex-col overflow-hidden lg:h-[calc(100vh-9rem)] {{ 'max-lg:hidden' if selected }}">
+    <div class="space-y-3 border-b border-line p-3">
+      <div class="flex items-center justify-between">
+        <h2 class="section-title">Rozmowy WhatsApp</h2>
+        <button class="btn-ghost !px-2 !py-1 text-xs" data-run="/api/chats/digest" data-busy="…" data-msg="Streszczenia generują się w tle" title="Odśwież streszczenia AI">{{ icon("sparkles", "h-3.5 w-3.5") }} Streść</button>
+      </div>
+      <div class="relative">
+        <span class="pointer-events-none absolute left-3 top-2.5 text-ink-faint">{{ icon("search") }}</span>
+        <input id="chat-search" class="input !pl-9" placeholder="Szukaj czatu…" oninput="filterChats(this.value)">
+      </div>
+      <div class="flex gap-1 overflow-x-auto scrollbar-hide">
+        {% for k, lbl in [("active", "Aktywne"), ("waiting", "Czekają"), ("new", "Nowe"), ("off", "Wyłączone")] %}
+        <a href="/chats?filter={{ k }}" class="chip shrink-0 {{ 'border-primary/40 bg-primary-soft text-primary-ink' if filter == k else 'border-line text-ink-muted hover:bg-surface-2' }}">
+          {{ lbl }} <span class="font-mono text-[10px] opacity-70">{{ counts[k] }}</span>
+        </a>
+        {% endfor %}
+      </div>
+      {% if filter == "new" %}<p class="text-xs text-ink-muted">Nowe czaty są analizowane domyślnie. Wyłącz te, które nie mają trafiać do raportów (np. prywatne).</p>{% endif %}
+    </div>
+    <div class="flex-1 overflow-y-auto" id="chat-list">
+      {% for c in chats %}
+      <div class="group relative" data-name="{{ (c.display or c.chat_name)|lower }}">
+        <a href="/chats/{{ c.jid }}?filter={{ filter }}" class="row-item !pr-12 {{ '!bg-primary-soft' if selected and selected.jid == c.jid }}">
+          {{ avatar(c.display or c.chat_name, "h-9 w-9 text-xs") }}
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-1.5">
+              {% if c.is_group %}<span class="text-ink-faint">{{ icon("users", "h-3 w-3") }}</span>{% endif %}
+              <span class="truncate text-sm font-semibold text-ink {{ 'opacity-50' if c.enabled == False }}">{{ c.display or c.chat_name }}</span>
+              <span class="ml-auto shrink-0 font-mono text-[10px] text-ink-faint">{{ c.last_message_at|ago if c.last_message_at else "" }}</span>
+            </div>
+            {% if c.digest %}
+            <p class="mt-0.5 line-clamp-2 text-xs text-ink-muted">{{ c.digest.summary }}</p>
+            {% endif %}
+            <div class="mt-1 flex items-center gap-1.5">
+              {% if c.waiting %}<span class="badge bg-amber-50 text-amber-700">czeka {{ c.waiting.waiting_since|ago }}</span>{% endif %}
+              {% if c.digest %}{{ importance_badge(c.digest.importance) }}{% endif %}
+              {% if c.today %}<span class="font-mono text-[10px] text-ink-faint">+{{ c.today }} dziś</span>{% endif %}
+            </div>
+          </div>
+        </a>
+        <form method="post" action="/api/whatsapp/chat/toggle" class="absolute right-2 top-2.5 opacity-0 group-hover:opacity-100 max-lg:opacity-100">
+          <input type="hidden" name="jid" value="{{ c.jid }}"><input type="hidden" name="back" value="/chats?filter={{ filter }}">
+          {% if c.enabled == False %}
+          <input type="hidden" name="enabled" value="true"><button class="btn-ghost !p-1.5" title="Włącz analizę">{{ icon("eye", "h-3.5 w-3.5") }}</button>
+          {% else %}
+          <input type="hidden" name="enabled" value="false"><button class="btn-ghost !p-1.5" title="Wyłącz — nie analizuj tego czatu">{{ icon("x", "h-3.5 w-3.5") }}</button>
+          {% endif %}
+        </form>
+      </div>
+      {% else %}
+      {{ empty("Brak czatów w tym widoku.", "message-circle") }}
+      {% endfor %}
+    </div>
+  </section>
+
+  {# ── Selected chat ── #}
+  <section class="card flex flex-col overflow-hidden lg:h-[calc(100vh-9rem)] {{ 'max-lg:hidden' if not selected }}">
+    {% if selected %}
+    <div class="flex items-center gap-3 border-b border-line px-4 py-3">
+      <a href="/chats?filter={{ filter }}" class="btn-ghost -ml-2 !p-1.5 lg:hidden">{{ icon("chevron-left") }}</a>
+      {{ avatar(selected.display or selected.chat_name, "h-9 w-9 text-xs") }}
+      <div class="min-w-0 flex-1">
+        <div class="truncate text-sm font-semibold text-ink">{{ selected.display or selected.chat_name }}</div>
+        <div class="text-xs text-ink-faint">{{ "Grupa" if selected.is_group else "Rozmowa prywatna" }} · {{ selected.total_messages|num }} wiadomości w bazie</div>
+      </div>
+      <form method="post" action="/api/whatsapp/chat/toggle">
+        <input type="hidden" name="jid" value="{{ selected.jid }}"><input type="hidden" name="back" value="/chats/{{ selected.jid }}">
+        {% if selected.enabled == False %}
+        <input type="hidden" name="enabled" value="true"><button class="btn-secondary !py-1.5 text-xs">{{ icon("eye", "h-3.5 w-3.5") }} Włącz analizę</button>
+        {% else %}
+        <input type="hidden" name="enabled" value="false"><button class="btn-ghost !py-1.5 text-xs">{{ icon("x", "h-3.5 w-3.5") }} Nie analizuj</button>
+        {% endif %}
+      </form>
+    </div>
+
+    <div class="flex-1 overflow-y-auto">
+      {% if digests %}
+      <div class="space-y-3 border-b border-line bg-canvas/50 p-4">
+        {% for d in digests[:3] %}
+        <div class="rounded-2xl border border-line bg-surface p-3.5">
+          <div class="flex items-center gap-2">
+            <span class="text-primary">{{ icon("sparkles", "h-3.5 w-3.5") }}</span>
+            <span class="text-xs font-semibold text-ink">Streszczenie · {{ d.day.strftime("%d.%m") }}</span>
+            {{ importance_badge(d.importance) }}
+            <span class="ml-auto font-mono text-[10px] text-ink-faint">{{ d.message_count }} wiad.</span>
+          </div>
+          <p class="mt-2 text-[13.5px] leading-relaxed text-ink-soft">{{ d.summary }}</p>
+          {% if d.needs_reply and d.reply_hint %}<p class="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">{{ icon("reply", "inline h-3 w-3 -mt-0.5") }} Czeka na Ciebie: {{ d.reply_hint }}</p>{% endif %}
+          {% if d.decisions %}<div class="mt-2 text-xs text-ink-muted"><span class="font-semibold text-ink-soft">Ustalenia:</span> {{ d.decisions|join("; ") }}</div>{% endif %}
+          {% if d.open_questions %}<div class="mt-1 text-xs text-ink-muted"><span class="font-semibold text-ink-soft">Otwarte:</span> {{ d.open_questions|join("; ") }}</div>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <div class="space-y-1.5 p-4" id="messages">
+        {% set ns = namespace(day=None) %}
+        {% for m in messages %}
+          {% set d = m.timestamp|short %}
+          {% if ns.day != d[:5] %}{% set ns.day = d[:5] %}
+          <div class="py-2 text-center"><span class="badge bg-surface-2 font-mono text-ink-faint">{{ d[:5] }}</span></div>
+          {% endif %}
+          {% set mine = m.metadata.from_me %}
+          <div class="flex {{ 'justify-end' if mine }}">
+            <div class="bubble {{ 'bubble-out' if mine else 'bubble-in' }}">
+              {% if not mine and selected.is_group %}<div class="mb-0.5 text-[11px] font-semibold text-primary-ink">{{ m.sender_display or m.metadata.sender_name }}</div>{% endif %}
+              {% if m.metadata.quoted_text %}<div class="mb-1 border-l-2 border-primary/40 pl-2 text-[11.5px] text-ink-muted line-clamp-2">{{ m.metadata.quoted_text }}</div>{% endif %}
+              <div class="whitespace-pre-wrap break-words">{{ m.body }}</div>
+              <div class="mt-0.5 text-right font-mono text-[10px] text-ink-faint">{{ m.timestamp|hm }}{% if m.metadata.edited %} · edytowana{% endif %}</div>
+            </div>
+          </div>
+        {% else %}
+          {{ empty("Brak wiadomości z ostatnich 14 dni.", "message-circle") }}
+        {% endfor %}
+      </div>
+    </div>
+    {% else %}
+    <div class="grid flex-1 place-items-center p-8">
+      <div class="max-w-sm text-center">
+        <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-primary-soft text-primary">{{ icon("message-circle", "h-5 w-5") }}</span>
+        <h3 class="mt-3 text-base font-semibold text-ink">Wybierz rozmowę</h3>
+        <p class="mt-1 text-sm text-ink-muted">Każdy aktywny czat jest raz dziennie czytany przez AI: streszczenie, ustalenia, otwarte kwestie, czy ktoś czeka na Twoją odpowiedź i jakie padły zobowiązania.</p>
+      </div>
+    </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterChats(q) {
+  q = q.trim().toLowerCase()
+  document.querySelectorAll('#chat-list [data-name]').forEach((el) => { el.hidden = q && !el.dataset.name.includes(q) })
+}
+const box = document.getElementById('messages')
+if (box) box.parentElement.scrollTop = box.parentElement.scrollHeight
+</script>
+{% endblock %}

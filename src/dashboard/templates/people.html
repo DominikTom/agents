@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, avatar, empty %}
+{% block title %}Ludzie{% endblock %}
+
+{% block content %}
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h2 class="page-title">Ludzie</h2>
+    <p class="page-subtitle">Kto jest kim w różnych źródłach. Dzięki temu AI wie, że „Maciek Ż.” z WhatsAppa to Maciej Żydziak z OS. Lista osób synchronizuje się z MyBed OS.</p>
+  </div>
+  <button class="btn-secondary" data-run="/api/jobs/os_people_sync/run" data-msg="Synchronizuję ludzi z MyBed OS" data-reload="5000">{{ icon("refresh-cw") }} Pobierz z OS</button>
+</div>
+
+{% if unmapped %}
+<section class="card mb-5 overflow-hidden">
+  <div class="panel-head">
+    <div><h3 class="section-title">Nierozpoznani nadawcy WhatsApp</h3><p class="mt-0.5 text-xs text-ink-muted">Przypisz ich do osób — ich wiadomości dostaną nazwisko i rolę w raportach.</p></div>
+    <span class="badge bg-amber-50 font-mono text-amber-700">{{ unmapped|length }}</span>
+  </div>
+  <div class="divide-y divide-line">
+    {% for u in unmapped %}
+    <form method="post" action="/api/entity/alias" class="flex flex-wrap items-center gap-3 px-4 py-2.5">
+      <input type="hidden" name="source" value="whatsapp"><input type="hidden" name="alias_name" value="{{ u.sender_name }}">
+      <div class="min-w-0 flex-1">
+        <span class="text-sm font-medium text-ink">{{ u.sender_name }}</span>
+        <span class="ml-2 font-mono text-[11px] text-ink-faint">{{ u.message_count }} wiad. · {{ u.last_seen|ago }}</span>
+      </div>
+      <select name="entity_id" class="input !w-auto !py-1.5 text-[13px]" required>
+        <option value="">To jest…</option>
+        {% for e in entities %}<option value="{{ e.id }}">{{ e.display_name }}</option>{% endfor %}
+      </select>
+      <button class="btn-secondary !py-1.5 text-xs">Przypisz</button>
+    </form>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="card overflow-hidden">
+  <div class="panel-head"><h3 class="section-title">Osoby i ich aliasy</h3><span class="badge bg-surface-2 font-mono text-ink-muted">{{ entities|length }}</span></div>
+  <div class="overflow-x-auto">
+    <table class="w-full min-w-[720px] text-sm">
+      <thead><tr class="border-b border-line text-left text-xs text-ink-muted">
+        <th class="px-4 py-2 font-medium">Osoba</th><th class="px-4 py-2 font-medium">WhatsApp</th><th class="px-4 py-2 font-medium">E-mail</th><th class="px-4 py-2 text-right font-medium">Zdarzeń</th>
+      </tr></thead>
+      <tbody>
+      {% for e in entities %}
+      <tr class="border-b border-line last:border-0 align-top hover:bg-surface-2">
+        <td class="px-4 py-2.5"><div class="flex items-center gap-2.5">{{ avatar(e.display_name) }}<span class="font-medium text-ink">{{ e.display_name }}</span></div></td>
+        {% for src in ["whatsapp", "gmail"] %}
+        <td class="px-4 py-2.5">
+          <div class="flex flex-wrap gap-1">
+            {% for a in e.aliases_by_source.get(src, []) %}
+            <form method="post" action="/api/entity/alias/delete" class="chip border-line text-ink-soft group">
+              <input type="hidden" name="alias_id" value="{{ a.id }}">{{ a.name }}
+              <button class="text-ink-faint hover:text-red-600" title="Usuń alias">{{ icon("x", "h-3 w-3") }}</button>
+            </form>
+            {% endfor %}
+            <form method="post" action="/api/entity/alias" class="inline-flex">
+              <input type="hidden" name="entity_id" value="{{ e.id }}"><input type="hidden" name="source" value="{{ src }}">
+              <input name="alias_name" class="w-28 rounded-full border border-dashed border-line bg-transparent px-2.5 py-1 text-xs placeholder:text-ink-faint focus:border-primary/50 focus:outline-none" placeholder="+ dodaj">
+            </form>
+          </div>
+        </td>
+        {% endfor %}
+        <td class="px-4 py-2.5 text-right font-mono text-ink-muted">{{ e.event_count }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,100 +1,108 @@
+{% from "_macros.html" import icon %}
 <!DOCTYPE html>
-<html lang="pl" class="h-full bg-gray-50">
+<html lang="pl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Dashboard{% endblock %} — Agents</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>{% block title %}Pulpit{% endblock %} — MyBed Agents</title>
+  <script>
+    // Theme before first paint (no flash): light / dark / system, like Group OS
+    (function () {
+      try {
+        var t = localStorage.getItem('theme') || 'system';
+        var dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.classList.toggle('dark', dark);
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css?v=3">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  {% block head %}{% endblock %}
 </head>
-<body class="h-full">
-<div class="min-h-full flex">
-    <!-- Sidebar -->
-    <nav class="w-64 bg-gray-900 text-white flex flex-col min-h-screen">
-        <div class="p-6">
-            <h1 class="text-xl font-bold">🤖 Agents</h1>
-            <p class="text-gray-400 text-sm mt-1">Panel zarządzania</p>
-        </div>
-        <ul class="flex-1 px-4 space-y-1">
-            <li>
-                <a href="/" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-800 {% if active == 'dashboard' %}bg-gray-800{% endif %}">
-                    <span>📊</span> Dashboard
-                </a>
-            </li>
-            <li>
-                <a href="/reports" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-800 {% if active == 'reports' %}bg-gray-800{% endif %}">
-                    <span>📝</span> Raporty
-                </a>
-            </li>
-            <li>
-                <a href="/whatsapp" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-800 {% if active == 'whatsapp' %}bg-gray-800{% endif %}">
-                    <span>📱</span> WhatsApp
-                </a>
-            </li>
-            <li>
-                <a href="/topics" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-800 {% if active == 'topics' %}bg-gray-800{% endif %}">
-                    <span>🧩</span> Tematy
-                </a>
-            </li>
-            <li>
-                <a href="/pipeline" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-800 {% if active == 'pipeline' %}bg-gray-800{% endif %}">
-                    <span>🔄</span> Pipeline
-                </a>
-            </li>
-            <li>
-                <a href="/connectors" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-800 {% if active == 'connectors' %}bg-gray-800{% endif %}">
-                    <span>🔌</span> Connectory
-                </a>
-            </li>
-            <li>
-                <a href="/velocity" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-800 {% if active == 'velocity' %}bg-gray-800{% endif %}">
-                    <span>📈</span> Velocity
-                </a>
-            </li>
-            <li>
-                <a href="/config" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-800 {% if active == 'config' %}bg-gray-800{% endif %}">
-                    <span>⚙️</span> Konfiguracja
-                </a>
-            </li>
-            <li>
-                <a href="/logs" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-800 {% if active == 'logs' %}bg-gray-800{% endif %}">
-                    <span>📋</span> Logi
-                </a>
-            </li>
-        </ul>
-        <div class="p-4 border-t border-gray-700">
-            <a href="/logout" class="text-gray-400 hover:text-white text-sm">Wyloguj się</a>
-        </div>
-    </nav>
+<body class="app-ambient">
+<div class="flex h-full min-h-screen">
 
-    <!-- Main content -->
-    <main class="flex-1 p-8 overflow-auto">
+  {# ── Sidebar (desktop) / drawer (mobile) ── #}
+  <div id="sidebar-backdrop" class="fixed inset-0 z-40 hidden bg-surface-dark/40 backdrop-blur-[2px] lg:hidden" onclick="toggleSidebar(false)"></div>
+  <aside id="sidebar" class="fixed inset-y-0 left-0 z-50 hidden w-64 shrink-0 flex-col border-r border-line bg-surface lg:sticky lg:top-0 lg:flex lg:h-screen">
+    <div class="flex h-14 items-center gap-2.5 border-b border-line px-5">
+      <span class="h-8 w-8 rounded-full" style="background: linear-gradient(135deg, rgb(var(--color-primary)), rgb(var(--color-accent)))"></span>
+      <div class="leading-tight">
+        <div class="text-sm font-bold text-ink">MyBed Group</div>
+        <div class="font-mono text-[11px] font-medium text-ink-faint">Agents</div>
+      </div>
+    </div>
+    <nav class="flex-1 space-y-4 overflow-y-auto px-2.5 py-3">
+      {% for group, items in nav %}
+      <div>
+        <div class="mb-1 px-2.5 text-xs font-medium text-ink-muted">{{ group }}</div>
+        <div class="space-y-0.5">
+          {% for href, label, ic, key in items %}
+          <a href="{{ href }}" class="nav-link group {{ 'nav-link-active' if active == key }}">
+            <span class="{{ 'text-primary' if active == key else 'text-ink-faint group-hover:text-ink-muted' }}">{{ icon(ic) }}</span>
+            <span class="flex-1">{{ label }}</span>
+          </a>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </nav>
+    <div class="border-t border-line px-2.5 py-2.5">
+      <a href="https://os.mybed.cloud" target="_blank" rel="noopener" class="nav-link">
+        <span class="text-ink-faint">{{ icon("external-link") }}</span><span class="flex-1">MyBed Group OS</span>
+      </a>
+      <a href="/logout" class="nav-link">
+        <span class="text-ink-faint">{{ icon("log-out") }}</span><span class="flex-1">Wyloguj</span>
+      </a>
+    </div>
+  </aside>
+
+  <div class="flex min-w-0 flex-1 flex-col">
+    {# ── Topbar ── #}
+    <header class="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface/80 px-4 backdrop-blur-md sm:px-5">
+      <button class="btn-ghost -ml-1 p-2 lg:hidden" onclick="toggleSidebar(true)" aria-label="Menu">{{ icon("menu", "h-5 w-5") }}</button>
+      <h1 class="shrink-0 truncate text-[15px] font-semibold text-ink">{% block heading %}{{ self.title() }}{% endblock %}</h1>
+      <div class="flex-1"></div>
+      {% block topbar_actions %}{% endblock %}
+      <div class="relative" data-dropdown>
+        <button class="btn-ghost p-2" data-dropdown-trigger aria-label="Motyw" title="Motyw">
+          <span data-theme-icon="light" class="hidden">{{ icon("sun", "h-5 w-5") }}</span>
+          <span data-theme-icon="dark" class="hidden">{{ icon("moon", "h-5 w-5") }}</span>
+          <span data-theme-icon="system" class="hidden">{{ icon("monitor", "h-5 w-5") }}</span>
+        </button>
+        <div data-dropdown-menu class="absolute right-0 top-11 z-50 hidden w-44 animate-scale-in rounded-2xl border border-line bg-surface p-1 shadow-pop">
+          <div class="px-2.5 py-1.5 text-xs font-medium text-ink-muted">Motyw</div>
+          <button class="nav-link w-full" onclick="setTheme('light')">{{ icon("sun") }} Jasny</button>
+          <button class="nav-link w-full" onclick="setTheme('dark')">{{ icon("moon") }} Ciemny</button>
+          <button class="nav-link w-full" onclick="setTheme('system')">{{ icon("monitor") }} Systemowy</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="with-bottom-nav flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
+      <div class="mx-auto max-w-7xl">
         {% block content %}{% endblock %}
+      </div>
     </main>
+  </div>
 </div>
 
-<script>
-async function runAgent(agentName) {
-    const btn = event.target;
-    btn.disabled = true;
-    btn.textContent = 'Uruchamiam...';
-    try {
-        const res = await fetch(`/api/run/${agentName}`, { method: 'POST' });
-        const data = await res.json();
-        if (data.status === 'started') {
-            btn.textContent = 'Uruchomiono!';
-            btn.classList.add('bg-green-600');
-            setTimeout(() => location.reload(), 3000);
-        } else {
-            btn.textContent = 'Błąd';
-            btn.classList.add('bg-red-600');
-        }
-    } catch (e) {
-        btn.textContent = 'Błąd połączenia';
-        btn.classList.add('bg-red-600');
-    }
-}
-</script>
+{# ── Bottom navigation (mobile) ── #}
+<nav class="pb-safe fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface/95 backdrop-blur-md lg:hidden">
+  <div class="grid grid-cols-5">
+    {% for href, label, ic, key in [("/", "Pulpit", "layout-dashboard", "pulpit"), ("/reports", "Raporty", "file-text", "reports"), ("/chats", "Rozmowy", "message-circle", "chats"), ("/commitments", "Zadania", "square-check", "commitments"), ("/sources", "Źródła", "plug", "sources")] %}
+    <a href="{{ href }}" class="flex min-h-[3.5rem] flex-col items-center justify-center gap-0.5 text-[11px] font-medium {{ 'text-primary' if active == key else 'text-ink-muted' }}">
+      {{ icon(ic, "h-5 w-5") }}<span>{{ label }}</span>
+    </a>
+    {% endfor %}
+  </div>
+</nav>
+
+<div id="toasts" class="pointer-events-none fixed bottom-20 right-4 z-[60] flex flex-col items-end gap-2 lg:bottom-6"></div>
+<script src="/static/app.js?v=3"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

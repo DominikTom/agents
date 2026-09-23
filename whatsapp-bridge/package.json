@@ -1,15 +1,19 @@
 {
   "name": "whatsapp-bridge",
-  "version": "2.0.0",
-  "description": "Read-only WhatsApp bridge using Baileys (no Chromium needed)",
+  "version": "3.0.0",
+  "description": "Read-only WhatsApp bridge (Baileys) with QR / pairing-code linking API",
+  "type": "module",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
-    "baileys": "^6.7.9",
-    "express": "^4.18.0",
+    "baileys": "6.7.24",
+    "express": "^4.21.0",
     "pino": "^9.0.0",
-    "qrcode-terminal": "^0.12.0"
+    "qrcode": "^1.5.4"
   }
 }

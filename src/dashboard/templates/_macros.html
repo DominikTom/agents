@@ -1,0 +1,56 @@
+{% macro icon(name, cls="") -%}
+<svg class="icon {{ cls }}" aria-hidden="true"><use href="/static/icons.svg#i-{{ name }}"></use></svg>
+{%- endmacro %}
+
+{% macro avatar(name, size="h-7 w-7 text-[11px]") -%}
+{%- set n = (name or "?") -%}
+{%- set parts = n.split() -%}
+{%- set initials = (parts[0][0] ~ (parts[1][0] if parts|length > 1 else "")) if parts else "?" -%}
+{%- set key = n|avatar_key -%}
+<span class="{{ size }} shrink-0 rounded-full grid place-items-center font-semibold text-white" style="background: rgb(var(--avatar-{{ key }}))">{{ initials|upper }}</span>
+{%- endmacro %}
+
+{% macro stat(label, value, sub=None, trend=None, href=None) -%}
+<{{ ('a href="' ~ href ~ '"')|safe if href else 'div' }} class="card p-4 block {{ 'hover:border-ink-faint/40 transition' if href }}">
+  <div class="stat-label">{{ label }}</div>
+  <div class="stat-value mt-1.5">{{ value }}</div>
+  {% if sub or trend is not none %}
+  <div class="mt-1 flex items-center gap-1.5 text-xs text-ink-muted">
+    {% if trend is not none %}
+      <span class="font-mono tabular-nums {{ 'text-red-600' if trend < -25 else '' }}">{{ trend|pct }}</span>
+    {% endif %}
+    {% if sub %}<span class="truncate">{{ sub }}</span>{% endif %}
+  </div>
+  {% endif %}
+</{{ 'a' if href else 'div' }}>
+{%- endmacro %}
+
+{% macro panel_head(title, count=None, href=None, link_label="Wszystkie", icon_name=None) -%}
+<div class="panel-head">
+  <div class="flex items-center gap-2 min-w-0">
+    {% if icon_name %}<span class="text-ink-faint">{{ icon(icon_name) }}</span>{% endif %}
+    <h2 class="section-title truncate">{{ title }}</h2>
+    {% if count is not none %}<span class="badge bg-surface-2 text-ink-muted font-mono">{{ count }}</span>{% endif %}
+  </div>
+  {% if href %}<a href="{{ href }}" class="btn-ghost !px-2 !py-1 text-xs">{{ link_label }} {{ icon("arrow-right", "h-3.5 w-3.5") }}</a>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro empty(text, icon_name="check") -%}
+<div class="empty flex flex-col items-center gap-2">
+  <span class="h-9 w-9 rounded-full bg-surface-2 grid place-items-center text-ink-faint">{{ icon(icon_name) }}</span>
+  <span>{{ text }}</span>
+</div>
+{%- endmacro %}
+
+{% macro status_dot(state) -%}
+{%- set colors = {"ok": "bg-emerald-500", "connected": "bg-emerald-500", "success": "bg-emerald-500",
+  "stale": "bg-amber-500", "waiting_qr": "bg-amber-500", "connecting": "bg-amber-500", "reconnecting": "bg-amber-500", "starting": "bg-amber-500", "idle": "bg-amber-500",
+  "error": "bg-red-500", "logged_out": "bg-red-500", "unreachable": "bg-red-500", "empty": "bg-slate-300"} -%}
+<span class="dot {{ colors.get(state, 'bg-slate-300') }}"></span>
+{%- endmacro %}
+
+{% macro importance_badge(level) -%}
+{% if level == "high" %}<span class="badge bg-red-50 text-red-700">Ważne</span>
+{% elif level == "low" %}<span class="badge bg-surface-2 text-ink-faint">Mało istotne</span>{% endif %}
+{%- endmacro %}

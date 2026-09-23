@@ -1,172 +1,221 @@
 {% extends "base.html" %}
-{% set active = "whatsapp" %}
-{% block title %}WhatsApp Monitor{% endblock %}
+{% from "_macros.html" import icon %}
+{% block title %}WhatsApp{% endblock %}
 
 {% block content %}
-<div class="flex items-center justify-between mb-6">
-    <h2 class="text-2xl font-bold text-gray-900">WhatsApp Monitor</h2>
-    <div class="text-sm text-gray-500">
-        {% if sync_status.last_sync %}
-            Ostatni sync: {{ sync_status.last_sync.strftime('%H:%M:%S') }} |
-        {% endif %}
-        Wiadomości w bazie: <span class="font-semibold">{{ sync_status.total }}</span>
-        {% if sync_status.recent > 0 %}
-            | <span class="text-green-600">+{{ sync_status.recent }} (ostatnie 5 min)</span>
-        {% endif %}
-    </div>
+<a href="/sources" class="btn-ghost -ml-2.5 mb-3">{{ icon("chevron-left") }} Źródła danych</a>
+<div class="mb-5">
+  <h2 class="page-title">Połączenie z WhatsApp</h2>
+  <p class="page-subtitle">Agenci czytają WhatsApp jako „połączone urządzenie” (jak WhatsApp Web). Tylko odczyt — nic nie wysyłają.</p>
 </div>
 
-<!-- Unmapped senders alert -->
-{% if unmapped %}
-<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
-    <h3 class="text-sm font-semibold text-yellow-800 mb-2">Niezmapowani nadawcy ({{ unmapped|length }})</h3>
-    <p class="text-xs text-yellow-600 mb-2">Dodaj mapowania w config/people.yaml (whatsapp_name)</p>
-    <div class="flex flex-wrap gap-2">
-        {% for u in unmapped[:20] %}
-        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-yellow-100 text-yellow-800">
-            {{ u.sender_name }} <span class="ml-1 text-yellow-500">({{ u.message_count }})</span>
-        </span>
-        {% endfor %}
-    </div>
+{% if not config.bridge_token %}
+<div class="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+  <b>Brak BRIDGE_TOKEN w .env.</b> Bridge działa bez uwierzytelnienia — ustaw token (np. <span class="font-mono">openssl rand -hex 32</span>) i przebuduj kontenery.
 </div>
 {% endif %}
 
-<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-    <!-- Chat management -->
-    <div class="lg:col-span-1 space-y-4">
-
-        <!-- Enabled chats -->
-        {% if enabled_chats %}
-        <div class="bg-white rounded-lg shadow p-4">
-            <h3 class="text-sm font-semibold text-green-700 mb-3 flex items-center gap-2">
-                <span class="w-2 h-2 rounded-full bg-green-500"></span>
-                Monitorowane ({{ enabled_chats|length }})
-            </h3>
-            <div class="space-y-1 max-h-[250px] overflow-y-auto">
-                {% for chat in enabled_chats %}
-                <div class="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-50 group">
-                    <div class="min-w-0 flex-1">
-                        <p class="text-sm text-gray-900 truncate">
-                            {% if chat.is_group %}👥{% else %}💬{% endif %}
-                            {{ chat.contact_name or chat.chat_name }}
-                        </p>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        {% if chat.today > 0 %}
-                        <span class="text-xs text-green-600">+{{ chat.today }}</span>
-                        {% endif %}
-                        <span class="text-xs text-gray-400">{{ chat.total_messages }}</span>
-                        <form method="POST" action="/api/whatsapp/chat/toggle" class="opacity-0 group-hover:opacity-100">
-                            <input type="hidden" name="jid" value="{{ chat.jid }}">
-                            <input type="hidden" name="enabled" value="false">
-                            <button type="submit" class="text-xs text-red-400 hover:text-red-600" title="Wyłącz">✕</button>
-                        </form>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-        </div>
-        {% endif %}
-
-        <!-- New/unset chats -->
-        {% if new_chats %}
-        <div class="bg-white rounded-lg shadow p-4">
-            <h3 class="text-sm font-semibold text-blue-700 mb-3 flex items-center gap-2">
-                <span class="w-2 h-2 rounded-full bg-blue-500"></span>
-                Nowe - zdecyduj ({{ new_chats|length }})
-            </h3>
-            <div class="space-y-1 max-h-[300px] overflow-y-auto">
-                {% for chat in new_chats %}
-                <div class="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-50">
-                    <div class="min-w-0 flex-1">
-                        <p class="text-sm text-gray-900 truncate">
-                            {% if chat.is_group %}👥{% else %}💬{% endif %}
-                            {{ chat.contact_name or chat.chat_name }}
-                        </p>
-                        <p class="text-xs text-gray-400">{{ chat.total_messages }} msg{% if chat.today > 0 %} | +{{ chat.today }} dziś{% endif %}</p>
-                    </div>
-                    <div class="flex items-center gap-1 ml-2">
-                        <form method="POST" action="/api/whatsapp/chat/toggle" class="inline">
-                            <input type="hidden" name="jid" value="{{ chat.jid }}">
-                            <input type="hidden" name="enabled" value="true">
-                            <button type="submit" class="px-2 py-1 text-xs rounded bg-green-100 text-green-700 hover:bg-green-200" title="Włącz monitorowanie">✓</button>
-                        </form>
-                        <form method="POST" action="/api/whatsapp/chat/toggle" class="inline">
-                            <input type="hidden" name="jid" value="{{ chat.jid }}">
-                            <input type="hidden" name="enabled" value="false">
-                            <button type="submit" class="px-2 py-1 text-xs rounded bg-red-100 text-red-700 hover:bg-red-200" title="Wyłącz">✕</button>
-                        </form>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-        </div>
-        {% endif %}
-
-        <!-- Disabled chats -->
-        {% if disabled_chats %}
-        <div class="bg-white rounded-lg shadow p-4">
-            <h3 class="text-sm font-semibold text-gray-500 mb-3 flex items-center gap-2">
-                <span class="w-2 h-2 rounded-full bg-gray-400"></span>
-                Wyłączone ({{ disabled_chats|length }})
-            </h3>
-            <div class="space-y-1 max-h-[200px] overflow-y-auto">
-                {% for chat in disabled_chats %}
-                <div class="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-50 group">
-                    <p class="text-sm text-gray-400 truncate flex-1">
-                        {% if chat.is_group %}👥{% else %}💬{% endif %}
-                        {{ chat.contact_name or chat.chat_name }}
-                    </p>
-                    <form method="POST" action="/api/whatsapp/chat/toggle" class="opacity-0 group-hover:opacity-100">
-                        <input type="hidden" name="jid" value="{{ chat.jid }}">
-                        <input type="hidden" name="enabled" value="true">
-                        <button type="submit" class="text-xs text-green-400 hover:text-green-600" title="Włącz ponownie">↩</button>
-                    </form>
-                </div>
-                {% endfor %}
-            </div>
-        </div>
-        {% endif %}
+<div class="grid grid-cols-1 gap-5 lg:grid-cols-5">
+  <section class="card overflow-hidden lg:col-span-3">
+    <div class="panel-head">
+      <div class="flex items-center gap-2"><span id="st-dot" class="dot bg-slate-300"></span><h3 class="section-title" id="st-title">Sprawdzam…</h3></div>
+      <span class="font-mono text-[11px] text-ink-faint" id="st-version"></span>
     </div>
 
-    <!-- Recent messages -->
-    <div class="lg:col-span-2">
-        <div class="bg-white rounded-lg shadow p-4">
-            <h3 class="text-lg font-semibold text-gray-900 mb-4">Ostatnie wiadomości</h3>
-            {% if messages %}
-            <div class="space-y-3 max-h-[700px] overflow-y-auto">
-                {% for msg in messages %}
-                <div class="border-b border-gray-100 pb-3 last:border-0">
-                    <div class="flex items-center justify-between mb-1">
-                        <div class="flex items-center gap-2">
-                            {% if msg.chat_type == 'group' %}
-                            <span class="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">{{ msg.chat_name }}</span>
-                            {% else %}
-                            <span class="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">{{ msg.chat_name }}</span>
-                            {% endif %}
-                            <span class="text-sm font-medium text-gray-900">
-                                {% set meta = msg.metadata if msg.metadata is mapping else {} %}
-                                {% if msg.sender_name %}
-                                    {{ msg.sender_name }}
-                                {% elif meta.get('from_me', False) %}
-                                    Ty
-                                {% elif meta.get('sender_name') %}
-                                    <span class="text-yellow-600">{{ meta.get('sender_name') }}</span>
-                                {% else %}
-                                    Nieznany
-                                {% endif %}
-                            </span>
-                        </div>
-                        <span class="text-xs text-gray-400">{{ msg.timestamp.strftime('%d.%m %H:%M') }}</span>
-                    </div>
-                    <p class="text-sm text-gray-700 break-words">{{ msg.body[:300] }}{% if msg.body|length > 300 %}...{% endif %}</p>
-                </div>
-                {% endfor %}
-            </div>
-            {% else %}
-            <p class="text-sm text-gray-500">Brak wiadomości w bazie. Sync startuje co 5 minut.</p>
-            {% endif %}
+    {# connected #}
+    <div id="v-connected" class="hidden p-5">
+      <div class="flex items-center gap-4">
+        <span class="grid h-12 w-12 place-items-center rounded-full bg-emerald-50 text-emerald-600">{{ icon("circle-check", "h-6 w-6") }}</span>
+        <div>
+          <div class="text-base font-semibold text-ink">Połączono <span id="me-name"></span></div>
+          <div class="font-mono text-sm text-ink-muted" id="me-phone"></div>
         </div>
+      </div>
+      <dl class="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <div class="rounded-xl bg-canvas p-3"><dt class="stat-label">Połączony od</dt><dd class="mt-1 font-mono text-sm text-ink" id="since">—</dd></div>
+        <div class="rounded-xl bg-canvas p-3"><dt class="stat-label">Ostatnia wiadomość</dt><dd class="mt-1 font-mono text-sm text-ink" id="last-msg">—</dd></div>
+        <div class="rounded-xl bg-canvas p-3"><dt class="stat-label">Bufor bridge</dt><dd class="mt-1 font-mono text-sm text-ink" id="store">—</dd></div>
+      </dl>
+      <div id="history" class="mt-3 hidden rounded-xl border border-line px-3 py-2.5 text-xs text-ink-muted"></div>
+      <div class="mt-5 flex flex-wrap gap-2">
+        <button class="btn-primary" onclick="act('sync', this)">{{ icon("refresh-cw") }} Synchronizuj teraz</button>
+        <button class="btn-secondary" onclick="act('restart', this)">{{ icon("refresh-cw") }} Połącz ponownie</button>
+        <button class="btn-ghost text-red-600" onclick="logout(this)">{{ icon("unlink") }} Wyloguj i połącz inny numer</button>
+      </div>
     </div>
+
+    {# waiting for QR scan #}
+    <div id="v-qr" class="hidden p-5">
+      <div class="grid items-start gap-6 sm:grid-cols-[auto_1fr]">
+        <div class="relative mx-auto rounded-2xl border border-line bg-white p-3">
+          <img id="qr-img" alt="Kod QR do połączenia WhatsApp" class="h-64 w-64" src="">
+          <div id="qr-wait" class="absolute inset-0 hidden place-items-center rounded-2xl bg-white/85 text-sm text-slate-500">Generuję kod…</div>
+        </div>
+        <div>
+          <ol class="space-y-3 text-sm text-ink-soft">
+            <li class="flex gap-3"><span class="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-primary-soft font-mono text-xs font-semibold text-primary-ink">1</span>Otwórz WhatsApp na telefonie.</li>
+            <li class="flex gap-3"><span class="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-primary-soft font-mono text-xs font-semibold text-primary-ink">2</span><span>Wejdź w <b>Ustawienia → Połączone urządzenia → Połącz urządzenie</b> (Android: menu ⋮).</span></li>
+            <li class="flex gap-3"><span class="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-primary-soft font-mono text-xs font-semibold text-primary-ink">3</span>Zeskanuj kod. Strona sama się odświeży po połączeniu.</li>
+          </ol>
+          <p class="mt-4 text-xs text-ink-faint">Kod zmienia się co ~20 sekund — to normalne. <span id="qr-age"></span></p>
+        </div>
+      </div>
+      <div class="mt-6 border-t border-line pt-5">
+        <h4 class="text-sm font-semibold text-ink">Nie możesz zeskanować? Połącz numerem telefonu</h4>
+        <p class="mt-1 text-xs text-ink-muted">Przydatne, gdy otwierasz panel na tym samym telefonie. W WhatsApp wybierz „Połącz za pomocą numeru telefonu” i wpisz kod.</p>
+        <div class="mt-3 flex max-w-md gap-2">
+          <input id="phone" class="input font-mono" inputmode="tel" placeholder="48 600 100 200" autocomplete="tel">
+          <button class="btn-secondary shrink-0" onclick="pair(this)">Pobierz kod</button>
+        </div>
+        <div id="pair-box" class="mt-4 hidden">
+          <div class="stat-label">Kod parowania dla <span id="pair-phone" class="font-mono"></span></div>
+          <div id="pair-code" class="mt-1 font-mono text-3xl font-semibold tracking-tight text-ink"></div>
+        </div>
+      </div>
+    </div>
+
+    {# busy / transitional #}
+    <div id="v-busy" class="hidden p-10 text-center">
+      <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-primary-soft text-primary">{{ icon("loader-circle", "h-6 w-6 animate-spin") }}</span>
+      <p class="mt-3 text-sm font-medium text-ink" id="busy-text">Łączę z WhatsApp…</p>
+      <p class="mt-1 text-xs text-ink-muted" id="busy-sub"></p>
+    </div>
+
+    {# paused (nobody watched the QR) #}
+    <div id="v-idle" class="hidden p-10 text-center">
+      <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-amber-50 text-amber-600">{{ icon("qr-code", "h-6 w-6") }}</span>
+      <p class="mt-3 text-sm font-medium text-ink">Kod QR wstrzymany</p>
+      <p class="mt-1 text-xs text-ink-muted">Kod wygasł, bo nikt go nie skanował. Wygeneruj nowy.</p>
+      <button class="btn-primary mt-4" onclick="act('restart', this)">{{ icon("qr-code") }} Pokaż nowy kod</button>
+    </div>
+
+    {# bridge down #}
+    <div id="v-down" class="hidden p-6">
+      <div class="flex items-start gap-3">
+        <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-red-50 text-red-600">{{ icon("triangle-alert") }}</span>
+        <div>
+          <p class="text-sm font-semibold text-ink">Bridge WhatsApp nie odpowiada</p>
+          <p class="mt-1 text-sm text-ink-muted" id="down-err"></p>
+          <p class="mt-3 text-xs text-ink-muted">Na serwerze: <span class="kbd">docker compose up -d --build whatsapp-bridge</span>, a potem sprawdź, czy <span class="font-mono">BRIDGE_TOKEN</span> w .env jest taki sam dla obu kontenerów.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="space-y-5 lg:col-span-2">
+    <section class="card p-5">
+      <h3 class="section-title">Synchronizacja z bazą</h3>
+      <dl class="mt-3 space-y-2 text-sm">
+        <div class="flex justify-between"><dt class="text-ink-muted">Wiadomości w bazie</dt><dd class="font-mono text-ink">{{ sync.total|num }}</dd></div>
+        <div class="flex justify-between"><dt class="text-ink-muted">Ostatni zapis</dt><dd class="font-mono text-ink">{{ sync.last_sync|ago if sync.last_sync else "—" }}</dd></div>
+        <div class="flex justify-between"><dt class="text-ink-muted">Nowe (5 min)</dt><dd class="font-mono text-ink">{{ sync.recent }}</dd></div>
+      </dl>
+      <p class="mt-3 text-xs text-ink-faint">Nowe wiadomości trafiają do bazy co 5 minut. Po ponownym połączeniu WhatsApp przesyła historię z ostatnich miesięcy — luka od rozłączenia uzupełni się sama.</p>
+    </section>
+    <section class="card p-5">
+      <h3 class="section-title">Które czaty są analizowane?</h3>
+      <p class="mt-2 text-sm text-ink-muted">Wszystkie poza wyłączonymi. Prywatne rozmowy wyłączysz jednym kliknięciem w Rozmowach.</p>
+      <a href="/chats?filter=new" class="btn-secondary mt-3">{{ icon("message-circle") }} Zarządzaj czatami</a>
+    </section>
+  </aside>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const VIEWS = ['connected', 'qr', 'busy', 'idle', 'down']
+const LABELS = {
+  connected: ['Połączono', 'bg-emerald-500'], waiting_qr: ['Czeka na zeskanowanie', 'bg-amber-500'],
+  starting: ['Uruchamianie', 'bg-amber-500'], connecting: ['Łączenie', 'bg-amber-500'],
+  reconnecting: ['Ponowne łączenie', 'bg-amber-500'], logged_out: ['Wylogowano', 'bg-red-500'],
+  idle: ['Wstrzymano', 'bg-amber-500'], unreachable: ['Bridge niedostępny', 'bg-red-500'],
+}
+const fmtTs = (ms) => ms ? new Date(ms).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'
+let last = null
+
+function show(view) { VIEWS.forEach((v) => document.getElementById('v-' + v).classList.toggle('hidden', v !== view)) }
+
+function render(s) {
+  last = s
+  const [label, dot] = LABELS[s.status] || [s.status, 'bg-slate-300']
+  document.getElementById('st-title').textContent = label
+  document.getElementById('st-dot').className = 'dot ' + dot
+  document.getElementById('st-version').textContent = s.waVersion ? 'WA ' + s.waVersion : ''
+  if (s.status === 'connected') {
+    show('connected')
+    document.getElementById('me-name').textContent = s.me && s.me.name ? '— ' + s.me.name : ''
+    document.getElementById('me-phone').textContent = s.me ? '+' + s.me.phone : ''
+    document.getElementById('since').textContent = fmtTs(s.connectedAt)
+    document.getElementById('last-msg').textContent = s.lastMessageAt ? fmtTs(s.lastMessageAt * 1000) : '—'
+    document.getElementById('store').textContent = s.store ? `${s.store.messages} wiad. / ${s.store.chats} czatów` : '—'
+    const h = document.getElementById('history')
+    if (s.history && s.history.batches && !s.history.done) {
+      h.classList.remove('hidden')
+      h.textContent = `Pobieranie historii: ${s.history.messages} wiadomości w ${s.history.batches} paczkach…`
+    } else h.classList.add('hidden')
+  } else if (s.status === 'waiting_qr') {
+    show('qr')
+    const img = document.getElementById('qr-img')
+    document.getElementById('qr-wait').classList.toggle('hidden', !!s.qr)
+    document.getElementById('qr-wait').classList.toggle('grid', !s.qr)
+    if (s.qr && img.src !== s.qr) img.src = s.qr
+    document.getElementById('qr-age').textContent = s.qrAt ? `Ostatni kod: ${Math.round((Date.now() - s.qrAt) / 1000)} s temu.` : ''
+    if (s.pairingCode) {
+      document.getElementById('pair-box').classList.remove('hidden')
+      document.getElementById('pair-code').textContent = s.pairingCode
+      document.getElementById('pair-phone').textContent = '+' + s.pairingPhone
+    }
+  } else if (s.status === 'idle') {
+    show('idle')
+  } else if (s.status === 'unreachable') {
+    show('down')
+    document.getElementById('down-err').textContent = s.error || ''
+  } else {
+    show('busy')
+    document.getElementById('busy-text').textContent = s.status === 'logged_out' ? 'WhatsApp wylogował to urządzenie — przygotowuję nowy kod QR…' : 'Łączę z WhatsApp…'
+    document.getElementById('busy-sub').textContent = s.lastDisconnect ? `Ostatnie rozłączenie: ${s.lastDisconnect.reason} (${fmtTs(s.lastDisconnect.at)})` : ''
+  }
+}
+
+async function poll() {
+  try {
+    const res = await fetch('/api/whatsapp/status')
+    if (res.status === 401) return (location.href = '/login?next=/sources/whatsapp')
+    const s = await res.json()
+    const wasConnected = last && last.status === 'connected'
+    render(s)
+    if (!wasConnected && s.status === 'connected' && last) toast('WhatsApp połączony', 'success')
+  } catch (e) {}
+  setTimeout(poll, last && last.status === 'connected' ? 15000 : 2500)
+}
+
+async function act(action, btn) {
+  busy(btn, true)
+  try {
+    await post('/api/whatsapp/' + action)
+    toast(action === 'sync' ? 'Synchronizacja uruchomiona' : 'Ponawiam połączenie…', 'success')
+  } catch (e) { toast(e.message, 'error') }
+  finally { busy(btn, false) }
+}
+
+async function logout(btn) {
+  if (!confirm('Wylogować to urządzenie z WhatsApp? Zeskanujesz nowy kod QR (możesz połączyć inny numer). Historia w bazie zostaje.')) return
+  act('logout', btn)
+}
+
+async function pair(btn) {
+  const phone = document.getElementById('phone').value
+  busy(btn, true)
+  try {
+    const res = await post('/api/whatsapp/pair', { phone })
+    document.getElementById('pair-box').classList.remove('hidden')
+    document.getElementById('pair-code').textContent = res.pairingCode
+    document.getElementById('pair-phone').textContent = '+' + phone.replace(/\D/g, '')
+  } catch (e) { toast(e.message, 'error') }
+  finally { busy(btn, false) }
+}
+
+render({{ bridge|tojson }})
+poll()
+</script>
 {% endblock %}

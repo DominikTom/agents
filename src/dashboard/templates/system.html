@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, status_dot, empty %}
+{% block title %}System{% endblock %}
+
+{% block content %}
+<div class="mb-5">
+  <h2 class="page-title">System</h2>
+  <p class="page-subtitle">Zadania w tle, zużycie AI, połączenia MCP i logi.</p>
+</div>
+
+<div class="grid grid-cols-1 gap-5 xl:grid-cols-3">
+  <section class="card overflow-hidden xl:col-span-2">
+    <div class="panel-head"><h3 class="section-title">Zadania w tle</h3></div>
+    {% for name, job in jobs.items() %}{% set label = job[0] %}
+    {% set r = last.get(name) %}
+    <div class="row-item items-center">
+      {{ status_dot(r.status if r else "empty") }}
+      <div class="min-w-0 flex-1">
+        <div class="text-sm font-medium text-ink">{{ label }}</div>
+        <div class="truncate text-xs text-ink-faint">{% if r %}{{ r.ran_at|ago }}{% if r.duration_ms %} · {{ (r.duration_ms / 1000)|round(1) }} s{% endif %}{% if r.error_message %} · <span class="text-red-600">{{ r.error_message }}</span>{% endif %}{% else %}jeszcze nie uruchamiane{% endif %}</div>
+      </div>
+      <button class="btn-ghost !py-1 text-xs" data-run="/api/jobs/{{ name }}/run" data-msg="{{ label }}: uruchomiono">{{ icon("play", "h-3.5 w-3.5") }} Uruchom</button>
+    </div>
+    {% endfor %}
+  </section>
+
+  <div class="space-y-5">
+    <section class="card overflow-hidden">
+      <div class="panel-head"><h3 class="section-title">Claude API · 30 dni</h3></div>
+      {% if usage %}
+      <table class="w-full text-xs">
+        <thead><tr class="border-b border-line text-left text-ink-muted"><th class="px-4 py-2 font-medium">Zadanie</th><th class="px-2 py-2 text-right font-medium">Wyw.</th><th class="px-4 py-2 text-right font-medium">Tokeny we/wy</th></tr></thead>
+        <tbody>
+        {% for u in usage %}
+        <tr class="border-b border-line last:border-0"><td class="px-4 py-2"><div class="text-ink">{{ u.purpose }}</div><div class="text-ink-faint">{{ u.model }}</div></td>
+          <td class="px-2 py-2 text-right font-mono">{{ u.calls }}</td>
+          <td class="px-4 py-2 text-right font-mono">{{ (u.input_tokens / 1000)|round|int }}k / {{ (u.output_tokens / 1000)|round|int }}k</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}{{ empty("Brak wywołań w ostatnich 30 dniach.", "sparkles") }}{% endif %}
+    </section>
+
+    <section class="card p-4">
+      <h3 class="section-title">Połączenia MCP (Claude.ai)</h3>
+      <p class="mt-1.5 text-xs text-ink-muted">Aktywnych klientów OAuth: <span class="font-mono font-semibold text-ink">{{ mcp_clients }}</span>. Nowe połączenie wymaga zalogowania w tym panelu i kliknięcia „Zezwól”.</p>
+      <form method="post" action="/api/mcp/revoke" onsubmit="return confirm('Odłączyć wszystkie połączenia MCP? Claude.ai poprosi o ponowną autoryzację.')" class="mt-3">
+        <button class="btn-secondary !py-1.5 text-xs">{{ icon("shield-check", "h-3.5 w-3.5") }} Odwołaj wszystkie tokeny</button>
+      </form>
+      {% if config.mcp_key %}<p class="mt-2 text-[11px] text-ink-faint">Statyczny <span class="font-mono">MCP_API_KEY</span> też jest aktywny — zmień go, jeśli był kiedyś ujawniony.</p>{% endif %}
+    </section>
+  </div>
+
+  <section class="card overflow-hidden xl:col-span-2">
+    <div class="panel-head"><h3 class="section-title">Historia uruchomień</h3></div>
+    <div class="max-h-[480px] overflow-y-auto">
+      <table class="w-full text-sm">
+        <tbody>
+        {% for r in runs %}
+        <tr class="border-b border-line last:border-0">
+          <td class="w-6 py-2 pl-4">{{ status_dot(r.status) }}</td>
+          <td class="px-2 py-2 text-ink">{{ r.agent_name }}</td>
+          <td class="px-2 py-2 font-mono text-xs text-ink-muted whitespace-nowrap">{{ r.ran_at|short }}</td>
+          <td class="px-2 py-2 text-right font-mono text-xs text-ink-faint">{% if r.duration_ms %}{{ (r.duration_ms / 1000)|round(1) }} s{% endif %}</td>
+          <td class="max-w-[280px] truncate px-4 py-2 text-xs text-red-600">{{ r.error_message or "" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card p-4">
+    <h3 class="section-title">Harmonogram zadań (agents.yaml)</h3>
+    <p class="mt-1 text-xs text-ink-muted">Godziny raportów ustawiasz w Studio. Tu tylko synchronizacje (cron, czas polski; dni tygodnia nazwami: mon-fri).</p>
+    <form method="post" action="/system/config" class="mt-3 space-y-2">
+      <textarea name="agents_yaml" rows="12" class="textarea font-mono text-xs">{{ agents_yaml }}</textarea>
+      <button class="btn-secondary !py-1.5 text-xs">Zapisz</button>
+      <p class="text-[11px] text-ink-faint">Zmiany harmonogramu synchronizacji działają po restarcie kontenera scheduler.</p>
+    </form>
+  </section>
+</div>
+{% endblock %}

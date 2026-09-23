@@ -1,30 +1,41 @@
 {% extends "base.html" %}
-{% set active = "reports" %}
-{% block title %}Raport #{{ report.id }}{% endblock %}
+{% from "_macros.html" import icon %}
+{% block title %}{{ report.title or "Raport" }}{% endblock %}
+{% block heading %}Raport{% endblock %}
 
 {% block content %}
-<div class="mb-4">
-    <a href="/reports" class="text-blue-600 hover:text-blue-800 text-sm">← Powrót do raportów</a>
-</div>
+<div class="mx-auto max-w-3xl">
+  <a href="/reports" class="btn-ghost -ml-2.5 mb-3">{{ icon("chevron-left") }} Raporty</a>
 
-<div class="bg-white rounded-xl shadow-sm border p-6">
-    <div class="flex items-center justify-between mb-4 pb-4 border-b">
-        <div>
-            <h2 class="text-xl font-bold">
-                {% if report.agent_name == 'morning_briefing' %}☀️ Morning Briefing{% else %}📊 Task Monitor{% endif %}
-            </h2>
-            <p class="text-gray-500 text-sm mt-1">{{ report.generated_at }}</p>
-        </div>
-        <div class="text-right text-sm">
-            {% if report.sources_used %}
-            <p class="text-green-600">Źródła: {{ report.sources_used }}</p>
-            {% endif %}
-            {% if report.sources_failed %}
-            <p class="text-red-600">Niedostępne: {{ report.sources_failed }}</p>
-            {% endif %}
-        </div>
-    </div>
+  <article class="card overflow-hidden">
+    <header class="border-b border-line p-5 sm:p-7">
+      <div class="text-xs font-medium text-primary-ink">{{ labels.get(report.agent_name, report.agent_name) }}{% if meta.preview %} · podgląd ze Studio{% endif %}</div>
+      <h2 class="mt-1 text-2xl font-bold tracking-tight text-ink">{{ report.title or labels.get(report.agent_name) }}</h2>
+      <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
+        <span class="font-mono">{{ report.generated_at|short }}</span>
+        {% if meta.model %}<span>{{ meta.model }}</span>{% endif %}
+        {% if meta.delivered and meta.delivered.email %}<span class="inline-flex items-center gap-1 text-emerald-700">{{ icon("mail", "h-3 w-3") }} wysłany do {{ meta.delivered.email.to|join(", ") }}</span>{% endif %}
+        {% if meta.delivered and meta.delivered.email_error %}<span class="text-amber-700">e-mail: {{ meta.delivered.email_error }}</span>{% endif %}
+      </div>
+      {% if report.summary %}
+      <p class="mt-4 rounded-xl bg-primary-soft px-4 py-3 text-[15px] leading-relaxed text-ink">{{ report.summary }}</p>
+      {% endif %}
+    </header>
+    <div class="prose-report p-5 sm:p-7">{{ report.html|safe }}</div>
+    <footer class="flex flex-wrap items-center gap-2 border-t border-line bg-canvas/60 px-5 py-3 sm:px-7">
+      <button class="btn-secondary" data-run="/api/reports/{{ report.id }}/resend" data-busy="Wysyłam…" data-msg="Wysłano e-mail">{{ icon("send") }} Wyślij e-mailem</button>
+      <button class="btn-ghost" onclick="navigator.clipboard.writeText(document.querySelector('.prose-report').innerText).then(() => toast('Skopiowano'))">{{ icon("copy") }} Kopiuj tekst</button>
+      <a class="btn-ghost ml-auto" href="/studio/{{ report.agent_name }}">{{ icon("sliders-horizontal") }} Dostosuj ten raport</a>
+    </footer>
+  </article>
 
-    <div class="prose max-w-none whitespace-pre-wrap text-gray-800 leading-relaxed">{{ report.body }}</div>
+  {% if meta.errors %}
+  <div class="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+    <div class="font-semibold">Niektóre źródła były niedostępne:</div>
+    <ul class="mt-1 list-disc pl-5">
+      {% for k, err in meta.errors.items() %}<li>{{ catalog[k].label if k in catalog else k }}: {{ err }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}

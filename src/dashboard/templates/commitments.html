@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, empty %}
+{% block title %}Zobowiązania{% endblock %}
+
+{% block content %}
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h2 class="page-title">Zobowiązania</h2>
+    <p class="page-subtitle">Wyłapane z rozmów: co obiecałeś, o co Cię poproszono i co inni obiecali Tobie. Zatwierdź, a trafi do MyBed OS jako Twoje prywatne zadanie.</p>
+  </div>
+  <div class="flex gap-2">
+    <div class="card px-3 py-2 text-xs"><span class="text-ink-muted">Otwarte</span> <span class="ml-1 font-mono font-semibold text-ink">{{ counts.open }}</span></div>
+    <div class="card px-3 py-2 text-xs"><span class="text-ink-muted">Po terminie</span> <span class="ml-1 font-mono font-semibold {{ 'text-red-600' if counts.overdue else 'text-ink' }}">{{ counts.overdue }}</span></div>
+  </div>
+</div>
+
+<div class="mb-4 flex gap-5 border-b border-line">
+  {% for k, lbl in [("open", "Otwarte"), ("done", "Zrobione"), ("dismissed", "Odrzucone")] %}
+  <a href="/commitments?status={{ k }}" class="tab {{ 'tab-active' if status == k }}">{{ lbl }}</a>
+  {% endfor %}
+</div>
+
+{% set groups = [("Twoje — obiecałeś albo ktoś Cię prosi", ["mine", "ask"]), ("Czekasz na innych", ["theirs"])] %}
+<div class="grid grid-cols-1 gap-5 xl:grid-cols-2">
+{% for title, dirs in groups %}
+  {% set items = rows|selectattr("direction", "in", dirs)|list %}
+  <section class="card overflow-hidden">
+    <div class="panel-head"><h3 class="section-title">{{ title }}</h3><span class="badge bg-surface-2 font-mono text-ink-muted">{{ items|length }}</span></div>
+    {% for c in items %}
+    <div class="row-item !py-3" id="c-{{ c.id }}">
+      <div class="min-w-0 flex-1">
+        <div class="flex flex-wrap items-center gap-1.5">
+          {% if c.direction == "ask" %}<span class="badge bg-sky-50 text-sky-700">prośba do Ciebie</span>
+          {% elif c.direction == "mine" %}<span class="badge bg-primary-soft text-primary-ink">obiecałeś</span>
+          {% else %}<span class="badge bg-surface-2 text-ink-muted">obiecane Tobie</span>{% endif %}
+          {% if c.due_date %}<span class="badge font-mono {{ 'bg-red-50 text-red-700' if c.due_date < today() else 'bg-surface-2 text-ink-muted' }}">{{ icon("clock", "h-3 w-3") }} {{ c.due_date.strftime("%d.%m") }}</span>
+          {% elif c.due_hint %}<span class="badge bg-surface-2 text-ink-muted">{{ c.due_hint }}</span>{% endif %}
+          {% if c.os_ref %}<span class="badge bg-emerald-50 text-emerald-700">{{ icon("check", "h-3 w-3") }} w OS</span>{% endif %}
+        </div>
+        <div class="mt-1.5 text-sm font-medium text-ink">{{ c.title }}</div>
+        <div class="mt-0.5 text-xs text-ink-muted">
+          {% if c.counterpart %}{{ c.counterpart }} · {% endif %}{{ "WhatsApp" if c.source == "whatsapp" else c.source }}{% if c.chat_name %}: <a class="hover:text-ink" href="/chats/{{ c.chat_jid }}">{{ c.chat_name }}</a>{% endif %} · {{ c.source_at|ago }}
+        </div>
+        {% if c.context %}<div class="mt-1.5 border-l-2 border-line pl-2 text-xs italic text-ink-faint">„{{ c.context }}”</div>{% endif %}
+        {% if status == "open" %}
+        <div class="mt-2.5 flex flex-wrap gap-1.5">
+          {% if c.direction != "theirs" and not c.os_ref and os_configured %}
+          <button class="btn-secondary !py-1 text-xs" onclick="toOS({{ c.id }}, 'task', this)">{{ icon("plus", "h-3.5 w-3.5") }} Dodaj do OS</button>
+          {% if push_suggestions %}<button class="btn-ghost !py-1 text-xs" onclick="toOS({{ c.id }}, 'suggestion', this)">Propozycja AI w OS</button>{% endif %}
+          {% endif %}
+          <button class="btn-ghost !py-1 text-xs" onclick="setStatus({{ c.id }}, 'done')">{{ icon("check", "h-3.5 w-3.5") }} Zrobione</button>
+          <button class="btn-ghost !py-1 text-xs" onclick="setStatus({{ c.id }}, 'dismissed')">{{ icon("x", "h-3.5 w-3.5") }} Nieaktualne</button>
+        </div>
+        {% else %}
+        <div class="mt-2"><button class="btn-ghost !py-1 text-xs" onclick="setStatus({{ c.id }}, 'open')">Przywróć</button></div>
+        {% endif %}
+      </div>
+    </div>
+    {% else %}
+    {{ empty("Pusto.", "square-check") }}
+    {% endfor %}
+  </section>
+{% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function setStatus(id, status) {
+  const fd = new FormData(); fd.append('status', status)
+  try { await post(`/api/commitments/${id}/status`, fd); document.getElementById('c-' + id).remove(); toast('Zapisano', 'success') }
+  catch (e) { toast(e.message, 'error') }
+}
+async function toOS(id, mode, btn) {
+  const fd = new FormData(); fd.append('mode', mode)
+  busy(btn, true, 'Dodaję…')
+  try {
+    const res = await post(`/api/commitments/${id}/os`, fd)
+    toast(mode === 'task' ? 'Dodano prywatne zadanie w MyBed OS' : 'Wysłano propozycję do OS', 'success')
+    btn.outerHTML = res.link ? `<a class="btn-secondary !py-1 text-xs" target="_blank" rel="noopener" href="${res.link}">Otwórz w OS</a>` : ''
+  } catch (e) { toast(e.message, 'error'); busy(btn, false) }
+}
+</script>
+{% endblock %}

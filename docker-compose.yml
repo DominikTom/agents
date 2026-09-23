@@ -7,8 +7,9 @@ services:
       POSTGRES_DB: agents
       POSTGRES_USER: agents
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # Only reachable from the host itself (e.g. SSH tunnel), never from the internet
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -17,11 +18,32 @@ services:
       timeout: 5s
       retries: 5
 
+  # Web panel + MCP server
   agents:
     build: .
     container_name: daily-agents
     restart: unless-stopped
     env_file: .env
+    environment:
+      WHATSAPP_BRIDGE_URL: http://whatsapp-bridge:3001
+    command: ["uvicorn", "src.dashboard.app:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers", "--forwarded-allow-ips", "*"]
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./credentials:/app/credentials:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Background jobs: ingestion, chat digests, scheduled reports
+  scheduler:
+    build: .
+    container_name: agents-scheduler
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      WHATSAPP_BRIDGE_URL: http://whatsapp-bridge:3001
+    command: ["python", "-m", "src.main", "schedule"]
     volumes:
       - ./config:/app/config
       - ./data:/app/data
@@ -46,12 +68,13 @@ services:
     depends_on:
       - agents
 
+  # No published port: only the agents containers can reach it
   whatsapp-bridge:
     build: ./whatsapp-bridge
     container_name: whatsapp-bridge
     restart: unless-stopped
-    ports:
-      - "3001:3001"
+    environment:
+      BRIDGE_TOKEN: ${BRIDGE_TOKEN}
     volumes:
       - whatsapp-auth:/app/auth_info
       - whatsapp-data:/app/data

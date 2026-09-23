@@ -1,0 +1,12 @@
+{
+  "name": "agents-dashboard-css",
+  "private": true,
+  "description": "Builds the panel stylesheet (Tailwind + MyBed Group OS design tokens)",
+  "scripts": {
+    "css": "tailwindcss -i src/dashboard/assets/app.css -o src/dashboard/static/app.css --minify",
+    "css:watch": "tailwindcss -i src/dashboard/assets/app.css -o src/dashboard/static/app.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  }
+}
