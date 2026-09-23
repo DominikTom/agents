@@ -256,6 +256,19 @@ let generation = 0
 let reconnectTimer = null
 let backoffMs = 2000
 let groupsRefreshedAt = 0
+let preQrFailures = 0 // closes before any QR on an unregistered session
+
+// WA_BROWSER=ubuntu|macos|windows (default ubuntu Chrome — Baileys' own default)
+function browserConfig() {
+  switch ((process.env.WA_BROWSER || 'ubuntu').toLowerCase()) {
+    case 'macos':
+      return Browsers.macOS('Desktop')
+    case 'windows':
+      return Browsers.windows('Desktop')
+    default:
+      return Browsers.ubuntu('Chrome')
+  }
+}
 
 const state = {
   status: 'starting', // starting | waiting_qr | connecting | connected | reconnecting | idle | logged_out
@@ -355,13 +368,15 @@ async function start() {
   log(`starting (WA ${state.waVersion}, registered: ${!!auth.creds.registered})`)
   state.status = auth.creds.registered ? 'connecting' : 'starting'
 
+  let sawQr = false
   sock = makeWASocket({
     version,
     auth: { creds: auth.creds, keys: makeCacheableSignalKeyStore(auth.keys, logger) },
     logger,
-    browser: Browsers.macOS('Desktop'), // "Desktop" unlocks full history sync
+    browser: browserConfig(),
     printQRInTerminal: false,
-    syncFullHistory: true,
+    syncFullHistory: process.env.WA_FULL_HISTORY === '1',
+    connectTimeoutMs: 30000,
     markOnlineOnConnect: false, // don't steal notifications from the phone
     generateHighQualityLinkPreview: false,
   })
@@ -374,6 +389,9 @@ async function start() {
     const { connection, lastDisconnect, qr } = update
 
     if (qr) {
+      if (!sawQr) log('QR ready — scan it in the panel')
+      sawQr = true
+      preQrFailures = 0
       state.status = 'waiting_qr'
       state.qr = qr
       state.qrAt = Date.now()
@@ -406,6 +424,7 @@ async function start() {
       state.connectedAt = null
       log(`connection closed (${code ?? 'no code'}): ${state.lastDisconnect.reason}`,
         lastDisconnect?.error?.data ? JSON.stringify(lastDisconnect.error.data).slice(0, 300) : '')
+      if (process.env.LOG_LEVEL === 'debug' && lastDisconnect?.error?.stack) log(lastDisconnect.error.stack)
 
       if (code === DisconnectReason.loggedOut || code === DisconnectReason.badSession || code === DisconnectReason.forbidden) {
         // Session is dead for good — start over with a fresh QR
@@ -421,6 +440,15 @@ async function start() {
         return
       }
       const registered = !!s.authState?.creds?.registered
+      if (!registered && !sawQr) {
+        // Closed before WhatsApp even sent a QR: after a few tries start from fresh keys,
+        // and back off hard so WhatsApp doesn't throttle this IP
+        preQrFailures += 1
+        if (preQrFailures % 3 === 0) {
+          log(`no QR after ${preQrFailures} attempts — wiping session keys`)
+          wipeAuth()
+        }
+      }
       if (!registered && !someoneWatching()) {
         // QR rotation ended and nobody is looking — wait for the panel
         state.status = 'idle'
@@ -428,7 +456,8 @@ async function start() {
         return
       }
       state.status = 'reconnecting'
-      const delay = code === DisconnectReason.connectionReplaced ? 30000 : backoffMs
+      let delay = code === DisconnectReason.connectionReplaced ? 30000 : backoffMs
+      if (!registered && !sawQr) delay = Math.max(delay, 15000)
       backoffMs = Math.min(backoffMs * 2, 60000)
       schedule(start, delay)
     }

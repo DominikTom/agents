@@ -75,6 +75,9 @@ services:
     restart: unless-stopped
     environment:
       BRIDGE_TOKEN: ${BRIDGE_TOKEN}
+      LOG_LEVEL: ${WA_LOG_LEVEL:-warn}
+      WA_BROWSER: ${WA_BROWSER:-ubuntu}
+      WA_VERSION: ${WA_VERSION:-}
     volumes:
       - whatsapp-auth:/app/auth_info
       - whatsapp-data:/app/data

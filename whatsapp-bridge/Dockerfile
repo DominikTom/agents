@@ -9,9 +9,12 @@ WORKDIR /app
 COPY package.json .
 RUN npm install --omit=dev
 
-COPY index.js .
+COPY index.js diag.mjs ./
 
 RUN mkdir -p /app/auth_info /app/data
+
+# Prefer IPv4: many VPS have broken IPv6 routes to WhatsApp
+ENV NODE_OPTIONS=--dns-result-order=ipv4first
 
 EXPOSE 3001
 
