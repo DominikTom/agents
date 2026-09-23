@@ -79,6 +79,10 @@
       <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-primary-soft text-primary">{{ icon("loader-circle", "h-6 w-6 animate-spin") }}</span>
       <p class="mt-3 text-sm font-medium text-ink" id="busy-text">Łączę z WhatsApp…</p>
       <p class="mt-1 text-xs text-ink-muted" id="busy-sub"></p>
+      <div id="busy-actions" class="mt-5 hidden flex-wrap justify-center gap-2">
+        <button class="btn-secondary" onclick="act('restart', this)">{{ icon("refresh-cw") }} Spróbuj ponownie</button>
+        <button class="btn-primary" onclick="reset(this)">{{ icon("qr-code") }} Zacznij od nowa (nowy kod QR)</button>
+      </div>
     </div>
 
     {# paused (nobody watched the QR) #}
@@ -132,11 +136,13 @@ const LABELS = {
 }
 const fmtTs = (ms) => ms ? new Date(ms).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'
 let last = null
+let busySince = null
 
 function show(view) { VIEWS.forEach((v) => document.getElementById('v-' + v).classList.toggle('hidden', v !== view)) }
 
 function render(s) {
   last = s
+  if (!['starting', 'connecting', 'reconnecting', 'logged_out'].includes(s.status)) busySince = null
   const [label, dot] = LABELS[s.status] || [s.status, 'bg-slate-300']
   document.getElementById('st-title').textContent = label
   document.getElementById('st-dot').className = 'dot ' + dot
@@ -172,6 +178,11 @@ function render(s) {
     document.getElementById('down-err').textContent = s.error || ''
   } else {
     show('busy')
+    // Stuck reconnecting (e.g. a dead session) — offer a clean start after ~20 s
+    busySince = busySince || Date.now()
+    const stuck = s.status === 'reconnecting' || Date.now() - busySince > 20000
+    const ba = document.getElementById('busy-actions')
+    ba.classList.toggle('hidden', !stuck); ba.classList.toggle('flex', stuck)
     document.getElementById('busy-text').textContent = s.status === 'logged_out' ? 'WhatsApp wylogował to urządzenie — przygotowuję nowy kod QR…' : 'Łączę z WhatsApp…'
     document.getElementById('busy-sub').textContent = s.lastDisconnect ? `Ostatnie rozłączenie: ${s.lastDisconnect.reason} (${fmtTs(s.lastDisconnect.at)})` : ''
   }
@@ -200,6 +211,11 @@ async function act(action, btn) {
 
 async function logout(btn) {
   if (!confirm('Wylogować to urządzenie z WhatsApp? Zeskanujesz nowy kod QR (możesz połączyć inny numer). Historia w bazie zostaje.')) return
+  act('logout', btn)
+}
+
+async function reset(btn) {
+  if (!confirm('Usunąć zapisaną sesję WhatsApp i wygenerować nowy kod QR? Wiadomości w bazie zostają.')) return
   act('logout', btn)
 }
 
