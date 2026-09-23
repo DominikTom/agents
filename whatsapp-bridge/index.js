@@ -1,5 +1,5 @@
 /**
- * WhatsApp Bridge v3 — Baileys (no Chromium), read-only.
+ * WhatsApp Bridge v3 — Baileys 7 (no Chromium), read-only.
  *
  * Links as a WhatsApp "linked device", keeps a local message buffer and
  * exposes it over HTTP to the Python ingestor. Linking can be done from the
@@ -207,7 +207,9 @@ function parseMessage(msg) {
 }
 
 function storeMessage(msg) {
-  const jid = msg.key?.remoteJid
+  // WhatsApp now addresses some chats by LID; keep phone-number JIDs so history stays in one chat
+  const raw = msg.key?.remoteJid
+  const jid = raw?.endsWith('@lid') && msg.key?.remoteJidAlt ? jidNormalizedUser(msg.key.remoteJidAlt) : raw
   if (!jid || isJidBroadcast(jid) || isJidNewsletter(jid) || jid === 'status@broadcast') return
   const parsed = parseMessage(msg)
   if (!parsed) return
@@ -284,12 +286,15 @@ const REASONS = {
 }
 
 function wipeAuth() {
-  try {
-    fs.rmSync(AUTH_DIR, { recursive: true, force: true })
-  } catch (err) {
-    log('failed to wipe auth:', err.message)
-  }
+  // auth_info is a Docker volume mount point — delete its contents, not the directory
   fs.mkdirSync(AUTH_DIR, { recursive: true })
+  for (const name of fs.readdirSync(AUTH_DIR)) {
+    try {
+      fs.rmSync(path.join(AUTH_DIR, name), { recursive: true, force: true })
+    } catch (err) {
+      log('failed to remove', name, err.message)
+    }
+  }
 }
 
 function closeSocket() {

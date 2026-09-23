@@ -11,7 +11,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "baileys": "6.7.24",
+    "baileys": "7.0.0-rc14",
     "express": "^4.21.0",
     "pino": "^9.0.0",
     "qrcode": "^1.5.4"
