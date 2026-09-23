@@ -124,7 +124,8 @@ async def authorize(
     if not code_challenge or code_challenge_method != "S256":
         return JSONResponse({"error": "invalid_request", "error_description": "PKCE S256 required"}, status_code=400)
     if not verify_session(request.cookies.get(COOKIE)):
-        return RedirectResponse(f"/login?{urlencode({'next': str(request.url)})}", status_code=302)
+        back = f"{request.url.path}?{request.url.query}"  # relative: survives proxy scheme/host quirks
+        return RedirectResponse(f"/login?{urlencode({'next': back})}", status_code=302)
 
     params = {
         "client_id": client_id, "redirect_uri": redirect_uri, "state": state or "",
