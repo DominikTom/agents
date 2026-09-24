@@ -46,7 +46,7 @@
     {% set t = dash.total %}
     {{ stat("Przychód · wczoraj", t.revenue|pln, "vs ten sam dzień tydz. temu", t.vs_same_weekday_pct) }}
     {{ stat("Zamówienia · wczoraj", t.orders|num, "średnio " ~ (t.aov|pln)) }}
-    {{ stat("Tydzień do dziś", dash.week_to_date.revenue|pln, "vs poprzedni tydzień", dash.week_to_date.vs_prev_week_pct) }}
+    {{ stat("Ostatnie 7 dni", dash.last_7_days.revenue|pln, (dash.last_7_days.orders|num) ~ " zam. · vs poprzednie 7 dni", dash.last_7_days.vs_prev_7_pct) }}
     {{ stat("Reklamy · wczoraj", dash.marketing.spend_day|pln, "Meta + Google · 7 dni " ~ (dash.marketing.spend_7d|pln)) }}
   {% elif erp %}
     {{ stat("Przychód · wczoraj", erp.revenue|pln, "IdeaERP, sklepy PLN") }}

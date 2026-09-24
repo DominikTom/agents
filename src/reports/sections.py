@@ -87,10 +87,11 @@ async def build_sales(ctx: ReportContext) -> dict:
         out["dzien"] = d["date"]
         out["razem"] = d["total"]
         out["sklepy"] = d["shops"]
-        out["tydzien_do_dzis"] = d["week_to_date"]
-        out["miesiac_do_dzis"] = d["month_to_date"]
-        out["ostatnie_7_dni"] = d["last_7_days"]
+        # "last 7 full days" (up to yesterday) is the main trend figure; Mon-to-date only in the weekly review
+        out["ostatnie_7_pelnych_dni_vs_poprzednie_7"] = d["last_7_days"]
+        out["miesiac_do_wczoraj"] = d["month_to_date"]
         if ctx.kind == "weekly":
+            out["tydzien_od_poniedzialku_do_wczoraj"] = d["week_to_date"]
             out["dzienne_30d"] = [{k: s[k] for k in ("date", "revenue", "orders")} for s in d["series"][-14:]]
     except Exception as e:
         out["dash_blad"] = str(e)
