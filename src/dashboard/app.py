@@ -412,7 +412,7 @@ async def chats_page(request: Request, jid: str | None = None, filter: str = "ac
             digests = await db.get_chat_digests(today() - timedelta(days=14), jid=jid, limit=14)
     return render(request, "chats.html", "chats", chats=shown, counts=counts, filter=filter,
                   selected=selected, messages=messages, digests=digests,
-                  bridge=await data.bridge_status())
+                  bridge=await data.bridge_status(db))
 
 
 @app.post("/api/whatsapp/chat/toggle")

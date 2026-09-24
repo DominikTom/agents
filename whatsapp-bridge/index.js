@@ -390,6 +390,8 @@ async function start() {
   s.ev.on('connection.update', async (update) => {
     if (gen !== generation) return
     const { connection, lastDisconnect, qr } = update
+    if (update.isNewLogin) log('phone accepted the link — finishing pairing')
+    if (connection === 'connecting') log('socket connecting')
 
     if (qr) {
       if (!sawQr) log('QR ready — scan it in the panel')

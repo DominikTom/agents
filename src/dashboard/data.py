@@ -34,13 +34,21 @@ def invalidate(prefix: str = "") -> None:
         _cache.pop(k, None)
 
 
-async def bridge_status() -> dict:
+async def bridge_status(db: Database | None = None) -> dict:
     async def load():
-        try:
-            return await asyncio.wait_for(BridgeClient(timeout=4).status(), timeout=5)
-        except (BridgeError, asyncio.TimeoutError) as e:
-            return {"status": "unreachable", "connected": False, "error": str(e) or "timeout"}
-    return await cached("bridge", 10, load)
+        for attempt in range(2):
+            try:
+                return await asyncio.wait_for(BridgeClient(timeout=8).status(), timeout=9)
+            except (BridgeError, asyncio.TimeoutError) as e:
+                err = str(e) or "timeout"
+        return {"status": "unreachable", "connected": False, "error": err}
+    status = dict(await cached("bridge", 10, load))
+    if not status.get("connected") and status.get("status") == "unreachable" and db is not None:
+        # Bridge busy (e.g. history sync) but messages keep arriving → it is connected
+        last = await db.last_ingest_at("whatsapp")
+        if last and (now() - last).total_seconds() < 20 * 60:
+            status.update(connected=True, busy=True)
+    return status
 
 
 async def os_snapshot():
@@ -129,7 +137,7 @@ async def pulpit(db: Database) -> dict:
     t = today()
     start, end = day_range(t)
     bridge, os_snap, dash, wa_wait, mail_wait, cal, commitments, digests, briefing, wrap = await asyncio.gather(
-        bridge_status(),
+        bridge_status(db),
         os_snapshot(),
         dash_overview(),
         db.get_whatsapp_awaiting(days=5, limit=8),
