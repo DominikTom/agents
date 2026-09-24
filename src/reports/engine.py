@@ -194,9 +194,10 @@ class ReportEngine:
         channel = (profile.get("slack_channel") or "").strip()
         if channel:
             try:
-                from src.outputs.slack_output import post_text
+                from src.outputs.slack_output import md_to_slack, post_text
 
-                await post_text(channel, f"*{title}*\n{lead}\n\n{body}" + (f"\n\n<{url}|Otwórz w panelu>" if url else ""))
+                text = f"*{title}*\n{md_to_slack(lead)}\n\n{md_to_slack(body)}"
+                await post_text(channel, text + (f"\n\n<{url}|Otwórz w panelu>" if url else ""))
                 delivered["slack"] = channel
             except Exception as e:
                 logger.error(f"Slack delivery failed: {e}")

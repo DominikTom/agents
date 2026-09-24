@@ -16,6 +16,7 @@
         {% if meta.model %}<span>{{ meta.model }}</span>{% endif %}
         {% if meta.delivered and meta.delivered.email %}<span class="inline-flex items-center gap-1 text-emerald-700">{{ icon("mail", "h-3 w-3") }} wysłany do {{ meta.delivered.email.to|join(", ") }}</span>{% endif %}
         {% if meta.delivered and meta.delivered.email_error %}<span class="text-amber-700">e-mail: {{ meta.delivered.email_error }}</span>{% endif %}
+        {% if meta.delivered and meta.delivered.slack_error %}<span class="text-amber-700">Slack: {{ meta.delivered.slack_error }}</span>{% endif %}
       </div>
       {% if report.summary %}
       <p class="mt-4 rounded-xl bg-primary-soft px-4 py-3 text-[15px] leading-relaxed text-ink">{{ report.summary }}</p>
