@@ -20,6 +20,16 @@ logger = logging.getLogger(__name__)
 DEFAULT_URL = "https://sebckrbvoghfdrppdxyt.supabase.co"
 # Shops that are real sales channels (warehouse also has 'unknown'/'manual')
 MAIN_SHOPS = ["mybed.pl", "mybed.de", "mittohome.pl"]
+# Meta ad account → shop (same mapping as the dash app, src/lib/meta-ads.ts)
+META_ACCOUNT_SHOP = {
+    "act_1681802382204753": "mybed.pl",
+    "act_637792865917248": "mybed.de",
+    "act_797212915921530": "mittohome.pl",
+}
+# Google Ads cost comes from GA4 (fact_daily_traffic, source='__total__'), in the
+# property currency: mybed.de reports in EUR, the Polish shops in PLN.
+GA4_EUR_HOSTS = {"mybed.de"}
+PLATFORM_LABELS = {"meta": "Meta", "google": "Google Ads"}
 
 
 class DashClient:
@@ -42,7 +52,14 @@ class DashClient:
 
     async def adspend(self, since: date, until: date) -> list[dict]:
         return await self.rest.select("fact_daily_adspend", {
-            "select": "date,platform,spend,clicks,impressions,conversions,conversion_value",
+            "select": "date,platform,account_id,spend,spend_original,original_currency",
+            "and": f"(date.gte.{since.isoformat()},date.lte.{until.isoformat()})",
+        })
+
+    async def google_cost(self, since: date, until: date) -> list[dict]:
+        return await self.rest.select("fact_daily_traffic", {
+            "select": "date,hostname,ad_cost",
+            "source": "eq.__total__",
             "and": f"(date.gte.{since.isoformat()},date.lte.{until.isoformat()})",
         })
 
@@ -56,18 +73,22 @@ class DashClient:
         """Numbers the reports need, all relative to `ref` (default: yesterday)."""
         ref = ref or (today() - timedelta(days=1))
         since = ref - timedelta(days=35)
-        rev, ads, rooms = await asyncio.gather(
-            self.revenue(since, ref), self.adspend(since, ref), self.showrooms(since, ref),
+        rev, meta, google, rooms = await asyncio.gather(
+            self.revenue(since, ref), self.adspend(since, ref), self.google_cost(since, ref),
+            self.showrooms(since, ref),
             return_exceptions=True,
         )
         if isinstance(rev, Exception):
             raise rev
-        return build_overview(
+        for name, res in (("Meta", meta), ("Google (GA4)", google), ("showroomy", rooms)):
+            if isinstance(res, Exception):
+                logger.warning(f"dash: {name} unavailable: {res}")
+        ads = normalize_spend(
+            [] if isinstance(meta, Exception) else meta,
+            [] if isinstance(google, Exception) else google,
             rev,
-            [] if isinstance(ads, Exception) else ads,
-            [] if isinstance(rooms, Exception) else rooms,
-            ref,
         )
+        return build_overview(rev, ads, [] if isinstance(rooms, Exception) else rooms, ref)
 
 
 def _f(v) -> float:
@@ -79,6 +100,37 @@ def _f(v) -> float:
 
 def _pct(a: float, b: float) -> float | None:
     return round((a - b) / b * 100, 1) if b else None
+
+
+def normalize_spend(meta: list[dict], google: list[dict], revenue: list[dict]) -> list[dict]:
+    """One list of {date, shop, platform, spend} in PLN for Meta + Google Ads."""
+    # EUR→PLN per day: from Meta DE rows (spend is PLN, spend_original EUR), else from DE revenue
+    rate: dict[str, float] = {}
+    for r in revenue:
+        if r.get("original_currency") == "EUR" and _f(r.get("revenue_gross_original")):
+            rate[r["date"]] = _f(r["revenue_gross_pln"]) / _f(r["revenue_gross_original"])
+    for a in meta:
+        if a.get("original_currency") == "EUR" and _f(a.get("spend_original")):
+            rate[a["date"]] = _f(a["spend"]) / _f(a["spend_original"])
+    fallback = (sum(rate.values()) / len(rate)) if rate else 4.25
+
+    out = []
+    for a in meta:
+        out.append({
+            "date": a["date"],
+            "shop": META_ACCOUNT_SHOP.get(a.get("account_id") or "", "inne"),
+            "platform": a.get("platform") or "meta",
+            "spend": _f(a.get("spend")),
+        })
+    for g in google:
+        cost = _f(g.get("ad_cost"))
+        if not cost:
+            continue
+        host = g.get("hostname") or "inne"
+        if host in GA4_EUR_HOSTS:
+            cost *= rate.get(g["date"], fallback)
+        out.append({"date": g["date"], "shop": host, "platform": "google", "spend": cost})
+    return out
 
 
 def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref: date) -> dict:
@@ -108,18 +160,24 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
         return tot
 
     spend_by_day: dict[str, float] = defaultdict(float)
-    spend_by_platform_day: dict[tuple[str, str], dict] = defaultdict(lambda: {"spend": 0.0, "conv_value": 0.0, "clicks": 0})
+    # (shop, platform) -> date -> spend
+    spend_cell: dict[tuple[str, str], dict[str, float]] = defaultdict(lambda: defaultdict(float))
     for a in ads:
-        spend_by_day[a["date"]] += _f(a.get("spend"))
-        agg = spend_by_platform_day[(a["date"], a.get("platform") or "inne")]
-        agg["spend"] += _f(a.get("spend"))
-        agg["conv_value"] += _f(a.get("conversion_value"))
-        agg["clicks"] += int(a.get("clicks") or 0)
+        spend_by_day[a["date"]] += a["spend"]
+        spend_cell[(a["shop"], a["platform"])][a["date"]] += a["spend"]
 
     def spend_range(start: date, end: date) -> float:
         total, d = 0.0, start
         while d <= end:
             total += spend_by_day.get(d.isoformat(), 0.0)
+            d += timedelta(days=1)
+        return round(total, 2)
+
+    def cell_range(key: tuple[str, str], start: date, end: date) -> float:
+        days = spend_cell.get(key, {})
+        total, d = 0.0, start
+        while d <= end:
+            total += days.get(d.isoformat(), 0.0)
             d += timedelta(days=1)
         return round(total, 2)
 
@@ -152,15 +210,29 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
     spend7 = spend_range(ref - timedelta(days=6), ref)
     spend_prev7 = spend_range(ref - timedelta(days=13), ref - timedelta(days=7))
 
-    platforms = []
-    for (d, platform), agg in spend_by_platform_day.items():
-        if d == ref.isoformat():
-            platforms.append({
-                "platform": platform,
-                "spend": round(agg["spend"], 2),
-                "roas": round(agg["conv_value"] / agg["spend"], 2) if agg["spend"] else None,
-                "clicks": agg["clicks"],
-            })
+    platforms = sorted({p for (_, p) in spend_cell})
+    by_shop = []
+    for shop in MAIN_SHOPS + sorted({sh for (sh, _) in spend_cell} - set(MAIN_SHOPS)):
+        row = {"shop": shop}
+        for p in platforms:
+            label = PLATFORM_LABELS.get(p, p)
+            row[label] = {
+                "dzien": cell_range((shop, p), ref, ref),
+                "7_dni": cell_range((shop, p), ref - timedelta(days=6), ref),
+            }
+        row["suma_dzien"] = round(sum(v["dzien"] for k, v in row.items() if isinstance(v, dict)), 2)
+        row["suma_7_dni"] = round(sum(v["7_dni"] for k, v in row.items() if isinstance(v, dict)), 2)
+        shop_prev7 = sum(cell_range((shop, p), ref - timedelta(days=13), ref - timedelta(days=7)) for p in platforms)
+        row["suma_7_dni_vs_poprz_pct"] = _pct(row["suma_7_dni"], shop_prev7)
+        if row["suma_7_dni"] or shop in MAIN_SHOPS:
+            by_shop.append(row)
+    by_platform = []
+    for p in platforms:
+        by_platform.append({
+            "platforma": PLATFORM_LABELS.get(p, p),
+            "dzien": round(sum(cell_range((sh, pp), ref, ref) for (sh, pp) in spend_cell if pp == p), 2),
+            "7_dni": round(sum(cell_range((sh, pp), ref - timedelta(days=6), ref) for (sh, pp) in spend_cell if pp == p), 2),
+        })
 
     series = []
     d = ref - timedelta(days=29)
@@ -197,11 +269,9 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
             "spend_day": round(spend_y, 2),
             "spend_7d": spend7,
             "spend_7d_vs_prev_pct": _pct(spend7, spend_prev7),
-            "mer_day": round(y["revenue"] / spend_y, 2) if spend_y else None,
-            "mer_7d": round(last7["revenue"] / spend7, 2) if spend7 else None,
-            "platforms": platforms,
-            # MER = revenue / spend of the platforms present in the warehouse (today: Meta only)
-            "platforms_covered": sorted({a.get("platform") or "inne" for a in ads}),
+            "per_sklep": by_shop,
+            "per_platforma": by_platform,
+            "zrodla": "Meta: konta reklamowe per sklep (dash). Google Ads: koszt z GA4 per domena, mybed.de przeliczone z EUR na PLN.",
         },
         "showrooms": [
             {"showroom": k, "orders_7d": v["orders_7d"], "revenue_7d": round(v["revenue_7d"], 2),

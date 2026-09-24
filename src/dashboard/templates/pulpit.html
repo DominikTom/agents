@@ -47,7 +47,7 @@
     {{ stat("Przychód · wczoraj", t.revenue|pln, "vs ten sam dzień tydz. temu", t.vs_same_weekday_pct) }}
     {{ stat("Zamówienia · wczoraj", t.orders|num, "średnio " ~ (t.aov|pln)) }}
     {{ stat("Tydzień do dziś", dash.week_to_date.revenue|pln, "vs poprzedni tydzień", dash.week_to_date.vs_prev_week_pct) }}
-    {{ stat("MER · 7 dni", (dash.marketing.mer_7d|string).replace(".", ",") if dash.marketing.mer_7d else "—", "wydatki " ~ (dash.marketing.platforms_covered|join("+") or "reklam") ~ " " ~ (dash.marketing.spend_7d|pln)) }}
+    {{ stat("Reklamy · wczoraj", dash.marketing.spend_day|pln, "Meta + Google · 7 dni " ~ (dash.marketing.spend_7d|pln)) }}
   {% elif erp %}
     {{ stat("Przychód · wczoraj", erp.revenue|pln, "IdeaERP, sklepy PLN") }}
     {{ stat("Zamówienia · wczoraj", erp.orders|num, "IdeaERP") }}

@@ -54,7 +54,7 @@
 
   {{ source_card("Dash — sprzedaż i reklamy", "shopping-cart", "ok" if dash else ("error" if config.dash else "off"),
       ([("Dane za", dash.date), ("Przychód", dash.total.revenue|pln), ("Wydatki reklam", dash.marketing.spend_day|pln)] if dash else [("Supabase", "hurtownia danych")]),
-      hint=None if config.dash else "Dodaj <span class='font-mono'>DASH_SUPABASE_SERVICE_KEY</span> do .env. Raporty dostaną sprzedaż per sklep, MER, ROAS i showroomy.") }}
+      hint=None if config.dash else "Dodaj <span class='font-mono'>DASH_SUPABASE_SERVICE_KEY</span> do .env. Raporty dostaną sprzedaż per sklep, wydatki Meta i Google Ads per sklep oraz showroomy.") }}
 
   {% set erp = runs.get("ideaerp_sync") %}
   {{ source_card("IdeaERP — dzisiejsze zamówienia", "store", ("error" if erp and erp.status == "error" else "ok") if config.ideaerp else "off",

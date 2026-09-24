@@ -27,8 +27,8 @@ SECTION_CATALOG: dict[str, dict] = {
     },
     "marketing": {
         "label": "Marketing i reklamy",
-        "description": "Wydatki reklamowe, ROAS per platforma i MER (przychód ÷ wydatki).",
-        "instruction": "Wydatki dnia i 7 dni, MER, ROAS per platforma. MER liczymy tylko z platform obecnych w danych (platforms_covered) — nazwij to wprost. Skomentuj tylko to, co wymaga reakcji (np. rosnące wydatki przy spadającym MER).",
+        "description": "Wydatki reklamowe per sklep (mybed.pl, mybed.de, MittoHome), osobno Meta i Google Ads.",
+        "instruction": "Tabela: wiersz = sklep (mybed.pl, mybed.de, mittohome.pl), kolumny: Meta, Google Ads, Suma — za wczoraj i za 7 dni (w zł). Pod tabelą wiersz „Razem”. Nie licz MER ani ROAS. Potem 1–2 zdania tylko o tym, co odstaje (np. wydatki sklepu rosną, a sprzedaż spada; platforma z zerem, choć zwykle wydaje).",
         "data": True,
     },
     "showrooms": {

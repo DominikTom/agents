@@ -3,7 +3,7 @@
 from datetime import date, timedelta
 
 from src.common.timeutil import today
-from src.connectors.dash import build_overview
+from src.connectors.dash import build_overview, normalize_spend
 from src.connectors.os_mybed import OSSnapshot
 from src.dashboard.auth import make_token, verify_login, verify_session
 from src.ingestion.whatsapp_ingest import render_body
@@ -70,14 +70,26 @@ def test_dash_overview_math():
         d = (ref - timedelta(days=i)).isoformat()
         rows.append({"date": d, "source_shop": "mybed.pl", "orders_count": 10, "revenue_gross_pln": 1000 + (100 if i == 0 else 0),
                      "revenue_paid_pln": 900, "avg_order_value_pln": 100, "revenue_gross_original": 1000, "original_currency": "PLN"})
-    ads = [{"date": ref.isoformat(), "platform": "meta", "spend": 100, "conversion_value": 500, "clicks": 10}]
+    rows.append({"date": ref.isoformat(), "source_shop": "mybed.de", "orders_count": 1, "revenue_gross_pln": 430,
+                 "revenue_paid_pln": 430, "avg_order_value_pln": 430, "revenue_gross_original": 100, "original_currency": "EUR"})
+    meta = [{"date": ref.isoformat(), "platform": "meta", "account_id": "act_1681802382204753", "spend": 100},
+            {"date": ref.isoformat(), "platform": "meta", "account_id": "act_637792865917248", "spend": 42,
+             "spend_original": 10, "original_currency": "EUR"}]
+    google = [{"date": ref.isoformat(), "hostname": "mybed.pl", "ad_cost": 300},
+              {"date": ref.isoformat(), "hostname": "mybed.de", "ad_cost": 10}]  # EUR → 42 zł
+    ads = normalize_spend(meta, google, rows)
     rooms = [{"showroom": "warszawa", "date": ref.isoformat(), "orders": 2, "revenue_pln": 5000},
              {"showroom": "krakow", "date": "2026-12-04", "orders": 1, "revenue_pln": 999}]  # future row ignored
     o = build_overview(rows, ads, rooms, ref)
-    assert o["total"]["revenue"] == 1100
-    assert o["total"]["vs_prev_day_pct"] == 10.0
-    assert o["marketing"]["mer_day"] == 11.0
-    assert o["marketing"]["platforms"][0]["roas"] == 5.0
+    assert o["total"]["revenue"] == 1530
+    m = o["marketing"]
+    assert m["spend_day"] == 484.0
+    pl, de, mitto = m["per_sklep"][:3]
+    assert (pl["shop"], pl["Meta"]["dzien"], pl["Google Ads"]["dzien"], pl["suma_dzien"]) == ("mybed.pl", 100, 300, 400)
+    assert (de["Meta"]["dzien"], de["Google Ads"]["dzien"]) == (42, 42)
+    assert mitto["suma_dzien"] == 0
+    assert {p["platforma"]: p["dzien"] for p in m["per_platforma"]} == {"Meta": 142, "Google Ads": 342}
+    assert "mer_day" not in m
     assert [s["showroom"] for s in o["showrooms"]] == ["warszawa"]
     assert len(o["series"]) == 30
 
