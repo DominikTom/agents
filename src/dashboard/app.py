@@ -284,7 +284,8 @@ async def studio_page(request: Request, key: str, saved: int = 0):
     if not authed(request):
         return login_redirect(request)
     from src.ai.client import MODEL_CHOICES
-    from src.reports.profiles import DAY_NAMES, LENGTHS, SECTION_CATALOG, load_general, load_profiles, schedule_label
+    from src.reports.profiles import (DAY_NAMES, KPI_METRICS, KPI_PERIODS, LENGTHS, SECTION_CATALOG, load_general,
+                                      load_profiles, schedule_label)
 
     db = get_db_sync()
     profiles = await load_profiles(db)
@@ -296,7 +297,7 @@ async def studio_page(request: Request, key: str, saved: int = 0):
         request, "studio.html", "studio",
         key=key, profiles=profiles, profile=profiles.get(key), general=general, catalog=SECTION_CATALOG,
         models=MODEL_CHOICES, lengths=LENGTHS, day_names=DAY_NAMES, schedule_label=schedule_label,
-        saved=saved, last=last, config=data.config_status(),
+        saved=saved, last=last, config=data.config_status(), kpi_metrics=KPI_METRICS, kpi_periods=KPI_PERIODS,
     )
 
 
@@ -321,6 +322,13 @@ def _profile_from_form(form, base: dict) -> dict:
         sections.append({"key": k, "enabled": form.get(f"sec_{k}") == "on", "note": (form.get(f"note_{k}") or "").strip()[:500]})
     if sections:
         p["sections"] = sections
+    if form.get("kpi_form"):
+        p["kpi"] = {
+            "enabled": form.get("kpi_enabled") == "on",
+            "periods": form.getlist("kpi_period"),
+            "metrics": form.getlist("kpi_metric"),
+            "per_shop": form.get("kpi_per_shop") == "on",
+        }
     return p
 
 

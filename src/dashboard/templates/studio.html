@@ -103,6 +103,47 @@
       </div>
     </section>
 
+    <section class="card p-5 space-y-4">
+      <input type="hidden" name="kpi_form" value="1">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 class="section-title">Liczby na górze raportu</h3>
+          <p class="mt-0.5 text-xs text-ink-muted">Tabela z hurtowni dash, liczona automatycznie (AI jej nie pisze). Przy każdej liczbie zmiana % do poprzedniego okresu o tej samej długości. Okresy kończą się na wczoraj.</p>
+        </div>
+        <label class="flex items-center gap-3">
+          <input type="checkbox" name="kpi_enabled" class="peer sr-only" {{ 'checked' if profile.kpi.enabled }}>
+          <span class="toggle"></span>
+        </label>
+      </div>
+      <div>
+        <label class="label">Okresy</label>
+        <div class="flex flex-wrap gap-1.5">
+          {% for k, lbl in kpi_periods.items() %}
+          <label>
+            <input type="checkbox" name="kpi_period" value="{{ k }}" class="peer sr-only" {{ 'checked' if k in profile.kpi.periods }}>
+            <span class="chip cursor-pointer border-line text-ink-muted peer-checked:border-primary/40 peer-checked:bg-primary-soft peer-checked:text-primary-ink">{{ lbl }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+      <div>
+        <label class="label">Wskaźniki</label>
+        <div class="flex flex-wrap gap-1.5">
+          {% for k, lbl in kpi_metrics.items() %}
+          <label>
+            <input type="checkbox" name="kpi_metric" value="{{ k }}" class="peer sr-only" {{ 'checked' if k in profile.kpi.metrics }}>
+            <span class="chip cursor-pointer border-line text-ink-muted peer-checked:border-primary/40 peer-checked:bg-primary-soft peer-checked:text-primary-ink">{{ lbl }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+      <label class="flex items-center gap-3">
+        <input type="checkbox" name="kpi_per_shop" class="peer sr-only" {{ 'checked' if profile.kpi.per_shop }}>
+        <span class="toggle"></span>
+        <span class="text-sm text-ink-soft">Rozbij na sklepy (mybed.pl, mybed.de, mittohome.pl) — osobna tabela dla każdego okresu</span>
+      </label>
+    </section>
+
     <section class="card overflow-hidden">
       <div class="panel-head">
         <div>

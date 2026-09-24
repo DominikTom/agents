@@ -72,7 +72,7 @@ class DashClient:
     async def overview(self, ref: date | None = None) -> dict:
         """Numbers the reports need, all relative to `ref` (default: yesterday)."""
         ref = ref or (today() - timedelta(days=1))
-        since = ref - timedelta(days=35)
+        since = ref - timedelta(days=65)  # 2 × 30 days for period comparisons
         rev, meta, google, rooms = await asyncio.gather(
             self.revenue(since, ref), self.adspend(since, ref), self.google_cost(since, ref),
             self.showrooms(since, ref),
@@ -234,6 +234,35 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
             "7_dni": round(sum(cell_range((sh, pp), ref - timedelta(days=6), ref) for (sh, pp) in spend_cell if pp == p), 2),
         })
 
+    def period_values(shop: str | None, start: date, end: date) -> dict:
+        rev = orders = 0.0
+        d = start
+        while d <= end:
+            t = day_total(d, None if shop is None else [shop])
+            rev += t["revenue"]
+            orders += t["orders"]
+            d += timedelta(days=1)
+        keys = [k for k in spend_cell if shop is None or k[0] == shop]
+        meta = sum(cell_range(k, start, end) for k in keys if k[1] == "meta")
+        google = sum(cell_range(k, start, end) for k in keys if k[1] == "google")
+        return {
+            "revenue": round(rev, 2), "orders": int(orders),
+            "aov": round(rev / orders, 2) if orders else None,
+            "spend_meta": round(meta, 2), "spend_google": round(google, 2), "spend_total": round(meta + google, 2),
+        }
+
+    periods = {}
+    for n in (1, 3, 7, 30):
+        cur_from, prev_from, prev_to = ref - timedelta(days=n - 1), ref - timedelta(days=2 * n - 1), ref - timedelta(days=n)
+        rows = []
+        for shop in [None] + MAIN_SHOPS:
+            c, p = period_values(shop, cur_from, ref), period_values(shop, prev_from, prev_to)
+            rows.append({"shop": shop or "Razem", **{
+                k: {"v": c[k], "prev": p[k], "pct": _pct(c[k] or 0, p[k] or 0)} for k in c
+            }})
+        periods[str(n)] = {"from": cur_from.isoformat(), "to": ref.isoformat(),
+                           "prev_from": prev_from.isoformat(), "prev_to": prev_to.isoformat(), "rows": rows}
+
     series = []
     d = ref - timedelta(days=29)
     while d <= ref:
@@ -279,4 +308,5 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
             for k, v in sorted(room_rows.items(), key=lambda kv: -kv[1]["revenue_7d"])
         ],
         "series": series,
+        "periods": periods,
     }

@@ -11,6 +11,7 @@ from src.ai.client import AIClient
 from src.common.config import get_env_optional, load_config
 from src.common.timeutil import fmt_date_pl, now as now_local
 from src.outputs.email_output import email_configured, send_email
+from src.reports.kpi import render_kpi
 from src.reports.profiles import LENGTHS, SECTION_CATALOG, load_general, load_profiles
 from src.reports.render import email_html, split_lead, to_html
 from src.reports.sections import ReportContext, dumps, gather_sections, report_window
@@ -106,7 +107,22 @@ class ReportEngine:
                 elif k in errors:
                     blocks.append(f"=== DANE: {SECTION_CATALOG[k]['label']} === NIEDOSTĘPNE ({errors[k]})")
 
+            kpi_md = ""
+            if (profile.get("kpi") or {}).get("enabled"):
+                try:
+                    kpi_md = render_kpi(await ctx.dash(), profile["kpi"])
+                except Exception as e:
+                    errors["kpi"] = str(e)[:200]
+            if kpi_md:
+                blocks.append(
+                    "=== TABELA „LICZBY” (wstawiana automatycznie na górę raportu, przed Twoim tekstem) ===\n" + kpi_md
+                )
+
             system = build_prompt(profile, general, kind)
+            if kpi_md:
+                system += ("\n\nNa górze raportu system wstawia tabelę „Liczby” (pokazana w danych). Nie przepisuj jej "
+                           "i nie twórz drugiej takiej tabeli. W sekcjach o sprzedaży i reklamach komentuj, co z niej wynika "
+                           "i co odstaje — liczby podawaj tylko wtedy, gdy są potrzebne do wniosku.")
             text = await self.ai.write(
                 system=system,
                 content="\n\n".join(blocks),
@@ -115,6 +131,8 @@ class ReportEngine:
                 purpose=key,
             )
             lead, body = split_lead(text)
+            if kpi_md:
+                body = f"{kpi_md}\n\n{body}"
             title = f"{profile.get('name') or KIND_LABELS.get(kind, key)} — {fmt_date_pl(current.date())}"
             html_body = to_html(body)
             meta = {

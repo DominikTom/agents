@@ -135,3 +135,25 @@ def test_commitment_fingerprint_ignores_word_order_and_punctuation():
     b = fingerprint("whatsapp", "jid", "mine", "cennik b2b wyślij sandrze")
     assert a == b
     assert a != fingerprint("whatsapp", "other", "mine", "Wyślij Sandrze cennik B2B")
+
+
+def test_kpi_periods_and_table():
+    from src.reports.kpi import render_kpi
+
+    ref = date(2026, 9, 22)
+    rows = [{"date": (ref - timedelta(days=i)).isoformat(), "source_shop": "mybed.pl", "orders_count": 1,
+             "revenue_gross_pln": 200 if i < 7 else 100, "revenue_paid_pln": 0, "avg_order_value_pln": 0,
+             "revenue_gross_original": 0, "original_currency": "PLN"} for i in range(60)]
+    ads = [{"date": (ref - timedelta(days=i)).isoformat(), "shop": "mybed.pl", "platform": "google", "spend": 10}
+           for i in range(60)]
+    o = build_overview(rows, ads, [], ref)
+    week = o["periods"]["7"]
+    assert (week["from"], week["prev_to"]) == ("2026-09-16", "2026-09-15")
+    total = week["rows"][0]
+    assert total["revenue"]["v"] == 1400 and total["revenue"]["pct"] == 100.0
+    assert total["spend_google"]["v"] == 70 and total["spend_meta"]["v"] == 0
+    md = render_kpi(o, {"enabled": True, "periods": ["1", "7"], "metrics": ["revenue", "spend_total"], "per_shop": True})
+    assert "## Liczby" in md and "1 400 zł (+100,0%)" in md and "16.09–22.09 (vs 09.09–15.09)" in md
+    assert render_kpi(o, {"enabled": False, "periods": ["7"], "metrics": ["revenue"]}) == ""
+    flat = render_kpi(o, {"enabled": True, "periods": ["30"], "metrics": ["orders"], "per_shop": False})
+    assert "| Ostatnie 30 dni (24.08–22.09) | 30 (±0,0%) |" in flat

@@ -119,6 +119,21 @@ LENGTHS = {
 
 DAY_NAMES = ["Pn", "Wt", "Śr", "Cz", "Pt", "Sb", "Nd"]
 
+# KPI table at the top of a report — computed from dash, never written by the AI
+KPI_METRICS = {
+    "revenue": "Przychód",
+    "orders": "Zamówienia",
+    "aov": "Średni koszyk",
+    "spend_total": "Reklamy razem",
+    "spend_meta": "Meta",
+    "spend_google": "Google Ads",
+}
+KPI_PERIODS = {"1": "Ostatni dzień", "3": "Ostatnie 3 dni", "7": "Ostatnie 7 dni", "30": "Ostatnie 30 dni"}
+
+
+def _kpi(periods: list[str], metrics: list[str], per_shop: bool = True) -> dict:
+    return {"enabled": True, "periods": periods, "metrics": metrics, "per_shop": per_shop}
+
 
 def _sections(keys_on: list[str], keys_off: list[str]) -> list[dict]:
     return [{"key": k, "enabled": True, "note": ""} for k in keys_on] + [
@@ -138,6 +153,7 @@ DEFAULT_PROFILES: dict[str, dict] = {
         "model": REPORT_MODEL,
         "length": "standard",
         "instructions": "",
+        "kpi": _kpi(["1", "7", "30"], ["revenue", "orders", "aov", "spend_meta", "spend_google", "spend_total"]),
         "sections": _sections(
             ["top", "awaiting", "calendar", "sales", "marketing", "chats", "commitments", "os_me", "team", "email"],
             ["projects", "showrooms", "topics", "risks", "plan", "slack"],
@@ -154,6 +170,7 @@ DEFAULT_PROFILES: dict[str, dict] = {
         "model": REPORT_MODEL,
         "length": "standard",
         "instructions": "",
+        "kpi": _kpi(["1", "7"], ["revenue", "orders", "spend_total"], per_shop=False),
         "sections": _sections(
             ["top", "topics", "chats", "awaiting", "commitments", "sales", "calendar", "risks", "plan"],
             ["email", "marketing", "os_me", "team", "projects", "showrooms", "slack"],
@@ -170,6 +187,7 @@ DEFAULT_PROFILES: dict[str, dict] = {
         "model": REPORT_MODEL,
         "length": "detailed",
         "instructions": "",
+        "kpi": _kpi(["7", "30"], ["revenue", "orders", "aov", "spend_meta", "spend_google", "spend_total"]),
         "sections": _sections(
             ["top", "sales", "marketing", "showrooms", "projects", "team", "topics", "chats", "commitments", "risks", "calendar", "plan"],
             ["awaiting", "email", "os_me", "slack"],
@@ -208,6 +226,10 @@ def merge_profiles(stored: dict | None) -> dict[str, dict]:
                 if s["key"] not in seen:
                     sections.append({**s, "enabled": False})
             p["sections"] = sections
+        kpi = {**default["kpi"], **(p.get("kpi") or {})}
+        kpi["periods"] = [x for x in KPI_PERIODS if x in {str(v) for v in kpi.get("periods") or []}]
+        kpi["metrics"] = [m for m in KPI_METRICS if m in set(kpi.get("metrics") or [])]
+        p["kpi"] = kpi
         p["key"] = key
         out[key] = p
     return out
