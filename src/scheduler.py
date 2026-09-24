@@ -17,6 +17,7 @@ TZ = "Europe/Warsaw"
 # job -> cron (minute hour day month dow); overridable in config/agents.yaml
 DEFAULT_CRONS = {
     "whatsapp_sync": "*/5 * * * *",
+    "whatsapp_watchdog": "*/5 * * * *",
     "gmail_sync": "*/10 * * * *",
     "calendar_sync": "*/30 * * * *",
     "ideaerp_sync": "5 * * * *",

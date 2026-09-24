@@ -33,6 +33,10 @@ class BridgeClient:
             raise BridgeError(data.get("error") or f"HTTP {resp.status_code}")
         return data
 
+    async def health(self) -> dict:
+        """Side-effect-free status (unlike /status it doesn't wake QR rotation)."""
+        return await self._request("GET", "/health")
+
     async def status(self) -> dict:
         return await self._request("GET", "/status")
 

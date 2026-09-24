@@ -256,7 +256,10 @@ let generation = 0
 let reconnectTimer = null
 let backoffMs = 2000
 let groupsRefreshedAt = 0
-let preQrFailures = 0 // closes before any QR on an unregistered session
+let preQrFailures = 0 // closes before any QR on an unlinked session
+
+// QR logins set creds.me; creds.registered is only set by the pairing-code flow
+const isLinked = (creds) => !!(creds?.me?.id || creds?.registered)
 
 // WA_BROWSER=ubuntu|macos|windows (default ubuntu Chrome — Baileys' own default)
 function browserConfig() {
@@ -365,8 +368,8 @@ async function start() {
   }
   if (gen !== generation) return
   state.waVersion = version ? version.join('.') : 'bundled'
-  log(`starting (WA ${state.waVersion}, registered: ${!!auth.creds.registered})`)
-  state.status = auth.creds.registered ? 'connecting' : 'starting'
+  log(`starting (WA ${state.waVersion}, linked: ${isLinked(auth.creds)})`)
+  state.status = isLinked(auth.creds) ? 'connecting' : 'starting'
 
   let sawQr = false
   sock = makeWASocket({
@@ -441,7 +444,7 @@ async function start() {
         schedule(start, 500)
         return
       }
-      const registered = !!s.authState?.creds?.registered
+      const registered = isLinked(s.authState?.creds)
       if (!registered && !sawQr) {
         // Closed before WhatsApp even sent a QR: after a few tries start from fresh keys,
         // and back off hard so WhatsApp doesn't throttle this IP
@@ -555,7 +558,7 @@ app.post('/pair', async (req, res) => {
   state.lastStatusPollAt = Date.now()
   const phone = String(req.body?.phone || '').replace(/\D/g, '')
   if (phone.length < 9) return res.status(400).json({ error: 'Podaj numer z kierunkowym, np. 48600100200' })
-  if (!sock || sock.authState?.creds?.registered) {
+  if (!sock || isLinked(sock.authState?.creds)) {
     return res.status(409).json({ error: 'Urządzenie jest już sparowane — najpierw wyloguj' })
   }
   if (state.status !== 'waiting_qr') {

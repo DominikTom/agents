@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import time
 from contextlib import asynccontextmanager
 
-from src.common.config import load_config
+from src.common.config import get_env_optional, load_config
 from src.common.timeutil import now, today
 from src.storage.database import Database
 
@@ -107,6 +108,70 @@ async def topic_extraction(db: Database | None = None) -> dict | None:
     return await _logged(db, "topic_extraction", TopicExtractor(db, AIClient(db=db)).extract(lookback_hours=24))
 
 
+WA_ALERT_AFTER_MIN = 15
+
+
+async def whatsapp_watchdog(db: Database | None = None) -> dict | None:
+    """Alert (Slack + e-mail) when WhatsApp has been disconnected for 15+ min, and when it's back."""
+    from src.connectors.whatsapp_bridge import BridgeClient, BridgeError
+
+    if db is None:
+        async with database() as db:
+            return await whatsapp_watchdog(db)
+    try:
+        status = (await BridgeClient(timeout=10).health()).get("status") or "?"
+    except BridgeError:
+        status = "bridge_down"
+    st = await db.get_setting("wa_watchdog", {}) or {}
+    ts = time.time()
+    if status == "connected":
+        if st.get("alerted"):
+            await _notify("✅ WhatsApp znowu połączony", "Agenci znów czytają WhatsApp. Luka zostanie uzupełniona automatycznie.")
+        if st:
+            await db.set_setting("wa_watchdog", {})
+        return {"status": status}
+    before = dict(st)
+    if not st.get("down_since"):
+        st = {"down_since": ts, "alerted": False}
+    minutes = int((ts - st["down_since"]) // 60)
+    if minutes >= WA_ALERT_AFTER_MIN and not st.get("alerted"):
+        base = (get_env_optional("PUBLIC_BASE_URL") or "").rstrip("/")
+        link = f"{base}/sources/whatsapp" if base else "panel → Źródła danych → WhatsApp"
+        await _notify(
+            "⚠️ WhatsApp rozłączony",
+            f"Od {minutes} min agenci nie czytają WhatsAppa (stan: {status}). "
+            f"Raporty nie zobaczą nowych rozmów. Połącz ponownie: {link}",
+        )
+        st["alerted"] = True
+    if st != before:
+        await db.set_setting("wa_watchdog", st)
+    return {"status": status, "down_min": minutes}
+
+
+async def _notify(title: str, text: str) -> None:
+    """Short system alert: Slack channel of the morning briefing (if set) + e-mail recipients."""
+    from src.outputs.email_output import email_configured, send_email
+    from src.reports.profiles import load_general, load_profiles
+
+    async with database() as db:
+        general = await load_general(db)
+        profiles = await load_profiles(db)
+    channel = next((p.get("slack_channel") for p in profiles.values() if (p.get("slack_channel") or "").strip()), None)
+    if channel and get_env_optional("SLACK_BOT_TOKEN"):
+        try:
+            from src.outputs.slack_output import post_text
+
+            await post_text(channel.strip(), f"*{title}*\n{text}")
+        except Exception as e:
+            logger.warning(f"Alert to Slack failed: {e}")
+    recipients = general.get("recipients") or []
+    if email_configured() and recipients:
+        try:
+            await send_email(recipients, title, f"<p>{html.escape(text)}</p>", text)
+        except Exception as e:
+            logger.warning(f"Alert e-mail failed: {e}")
+
+
 async def run_report(key: str, db: Database | None = None, deliver: bool = True) -> dict | None:
     from src.reports.engine import ReportEngine
 
@@ -128,4 +193,5 @@ JOBS = {
     "os_people_sync": ("Ludzie z MyBed OS", os_people_sync),
     "chat_digests": ("Streszczenia czatów", chat_digests),
     "topic_extraction": ("Wątki przekrojowe", topic_extraction),
+    "whatsapp_watchdog": ("Alarm: WhatsApp rozłączony", whatsapp_watchdog),
 }
