@@ -17,7 +17,8 @@ SOURCES: dict[str, dict] = {
                "Głosówki i pliki są oznaczane (bez transkrypcji).",
         "cadence": "co 5 min",
         "processing": "Raz na godzinę (8–20) AI streszcza każdy aktywny czat z danego dnia: streszczenie, ustalenia, "
-                      "otwarte kwestie, czy ktoś czeka na Twoją odpowiedź, zobowiązania.",
+                      "otwarte kwestie, czy ktoś czeka na Twoją odpowiedź, zobowiązania. Potem AI czyta dalszy ciąg "
+                      "rozmów z otwartymi zobowiązaniami i zamyka załatwione, nieaktualne i zdublowane.",
         "job": "whatsapp_sync",
         "health": "whatsapp",
     },

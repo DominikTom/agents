@@ -137,6 +137,11 @@ class ChatDigester:
                     f"Czat: {name} ({kind})\nData: {fmt_date_pl(day)} ({day.isoformat()})\n"
                     f"Liczba wiadomości tego dnia: {len(messages)}\n\n" + "\n".join(transcript)
                 )
+                known = await self.db.get_open_commitments_for_chat(chat["jid"])
+                if known:
+                    content += ("\n\n=== JUŻ ZAPISANE OTWARTE ZOBOWIĄZANIA Z TEGO CZATU ===\n"
+                                "Nie zwracaj ich ponownie ani w innym sformułowaniu — w commitments tylko nowe sprawy.\n"
+                                + "\n".join(f"- {c['title']}" for c in known))
                 result = await self.ai.extract(
                     system=SYSTEM_PROMPT, content=content, schema=DIGEST_SCHEMA,
                     model=self.model, max_tokens=6000, effort="medium", purpose="chat_digest",

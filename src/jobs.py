@@ -129,7 +129,20 @@ async def chat_digests(db: Database | None = None, day=None, force: bool = False
     if db is None:
         async with database() as db:
             return await chat_digests(db, day, force)
-    return await _logged(db, "chat_digests", ChatDigester(db, AIClient(db=db)).run(day or today(), force=force))
+    async def both():
+        from src.processing.commitment_reconcile import CommitmentReconciler
+
+        ai = AIClient(db=db)
+        out = await ChatDigester(db, ai).run(day or today(), force=force)
+        # new messages may settle earlier commitments (a reply, a delivery, a cancellation)
+        try:
+            out["commitments_reconciled"] = await CommitmentReconciler(db, ai).run()
+        except Exception as e:
+            logger.warning(f"Commitment reconcile failed: {e}")
+            out["reconcile_error"] = str(e)[:200]
+        return out
+
+    return await _logged(db, "chat_digests", both())
 
 
 async def topic_extraction(db: Database | None = None) -> dict | None:

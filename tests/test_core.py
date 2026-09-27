@@ -411,3 +411,45 @@ def test_workdays_follow_polish_holidays():
 
     assert not is_workday(date(2026, 11, 11)) and not is_workday(date(2026, 6, 4))  # Independence Day, Corpus Christi
     assert previous_workday(date(2026, 11, 12)) == date(2026, 11, 10)
+
+
+def test_commitment_reconcile_applies_verdicts_safely():
+    import asyncio
+    from datetime import datetime, timezone
+
+    from src.processing.commitment_reconcile import CommitmentReconciler
+
+    t0 = datetime(2026, 9, 22, 9, 0, tzinfo=timezone.utc)
+    items = [{"id": i, "direction": d, "title": f"sprawa {i}", "context": "", "counterpart": "Magda",
+              "chat_jid": "c1", "chat_name": "Magda", "source_at": t0, "due_date": None, "checked_until": None}
+             for i, d in [(1, "ask"), (2, "ask"), (3, "theirs"), (4, "mine"), (5, "mine")]]
+
+    class DB:
+        closed, checked = {}, None
+
+        async def get_chat_messages(self, jid, since=None, limit=300):
+            return [{"timestamp": t0, "body": "ok", "metadata": {"from_me": True}}]
+
+        async def auto_close_commitment(self, cid, status, reason):
+            self.closed[cid] = (status, reason)
+
+        async def mark_commitments_checked(self, ids, until):
+            self.checked = (ids, until)
+
+    class AI:
+        async def extract(self, **kw):
+            assert "id 1" in kw["content"] and "prośba do Dominika" in kw["content"]
+            return {"items": [
+                {"id": 1, "status": "done", "duplicate_of": 0, "reason": "Dominik odpisał"},
+                {"id": 2, "status": "duplicate", "duplicate_of": 1, "reason": ""},   # points at a closed item → kept
+                {"id": 3, "status": "duplicate", "duplicate_of": 4, "reason": ""},   # valid duplicate
+                {"id": 4, "status": "open", "duplicate_of": 0, "reason": ""},
+                {"id": 99, "status": "done", "duplicate_of": 0, "reason": "halucynacja"},
+            ]}
+
+    db = DB()
+    counts = asyncio.run(CommitmentReconciler(db, AI())._chat("c1", items))
+    assert db.closed == {1: ("done", "Dominik odpisał"), 3: ("dismissed", "duplikat: sprawa 4")}
+    assert counts == {"done": 1, "obsolete": 0, "duplicate": 1} and db.checked[0] == [1, 2, 3, 4, 5]
+    items_checked = [{**c, "checked_until": t0} for c in items]
+    assert asyncio.run(CommitmentReconciler(DB(), AI())._chat("c1", items_checked)) is None  # nothing new

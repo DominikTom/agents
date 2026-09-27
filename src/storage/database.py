@@ -211,6 +211,11 @@ ALTER TABLE reports ADD COLUMN IF NOT EXISTS title TEXT;
 ALTER TABLE reports ADD COLUMN IF NOT EXISTS html TEXT;
 ALTER TABLE reports ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}';
 ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS details JSONB;
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS resolved_by TEXT;
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS resolution TEXT;
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS checked_until TIMESTAMPTZ;
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS keep_open BOOLEAN DEFAULT FALSE;
 
 -- Key/value settings edited from the panel (report profiles, preferences)
 CREATE TABLE IF NOT EXISTS settings (
@@ -1215,7 +1220,8 @@ class Database:
         return await self._fetchall(
             "SELECT * FROM commitments WHERE ($1::text IS NULL OR status = $1) "
             "AND ($2::text IS NULL OR direction = $2) "
-            "ORDER BY (due_date IS NULL), due_date, source_at DESC NULLS LAST LIMIT $3",
+            "ORDER BY CASE WHEN $1 = 'open' THEN NULL ELSE COALESCE(resolved_at, updated_at) END DESC NULLS LAST, "
+            "(due_date IS NULL), due_date, source_at DESC NULLS LAST LIMIT $3",
             status, direction, limit,
         )
 
@@ -1223,9 +1229,54 @@ class Database:
         return await self._fetchone("SELECT * FROM commitments WHERE id = $1", cid)
 
     async def set_commitment_status(self, cid: int, status: str) -> None:
+        """A decision made in the panel. Restoring an item keeps it open for good (no automatic closing)."""
         await self._execute(
-            "UPDATE commitments SET status = $2, updated_at = NOW() WHERE id = $1", cid, status
+            "UPDATE commitments SET status = $2, updated_at = NOW(), resolved_by = 'user', "
+            "resolution = NULL, resolved_at = CASE WHEN $2 = 'open' THEN NULL ELSE NOW() END, "
+            "keep_open = ($2 = 'open') WHERE id = $1", cid, status
         )
+
+    async def get_open_commitments_for_chat(self, jid: str, limit: int = 40) -> list[dict]:
+        return await self._fetchall(
+            "SELECT id, direction, title FROM commitments WHERE status = 'open' AND chat_jid = $1 "
+            "ORDER BY source_at DESC NULLS LAST LIMIT $2", jid, limit,
+        )
+
+    async def get_reconcilable_commitments(self) -> list[dict]:
+        """Open chat commitments the reconciler may close (not restored by the CEO), grouped by chat."""
+        return await self._fetchall(
+            "SELECT * FROM commitments WHERE status = 'open' AND NOT COALESCE(keep_open, FALSE) "
+            "AND chat_jid IS NOT NULL ORDER BY chat_jid, source_at NULLS LAST, id"
+        )
+
+    async def auto_close_commitment(self, cid: int, status: str, reason: str) -> None:
+        await self._execute(
+            "UPDATE commitments SET status = $2, resolution = $3, resolved_by = 'auto', resolved_at = NOW() "
+            "WHERE id = $1 AND status = 'open' AND NOT COALESCE(keep_open, FALSE)", cid, status, reason,
+        )
+
+    async def mark_commitments_checked(self, ids: list[int], until: datetime) -> None:
+        await self._execute(
+            "UPDATE commitments SET checked_until = GREATEST(COALESCE(checked_until, $2), $2) WHERE id = ANY($1::int[])",
+            ids, until,
+        )
+
+    async def get_open_commitment_os_refs(self) -> list[dict]:
+        return await self._fetchall(
+            "SELECT id, os_ref FROM commitments WHERE status = 'open' AND os_ref LIKE 'task-%'"
+        )
+
+    async def expire_commitments(self, days: int) -> int:
+        """No new mention for `days` and no deadline still ahead (or one long gone) → no longer current."""
+        rows = await self._fetchall(
+            "UPDATE commitments SET status = 'dismissed', resolved_by = 'auto', resolved_at = NOW(), "
+            "resolution = 'wygasło — ' || $1::int || ' dni bez żadnego ruchu w rozmowie' "
+            "WHERE status = 'open' AND NOT COALESCE(keep_open, FALSE) "
+            "AND updated_at < NOW() - make_interval(days => $1::int) "
+            "AND COALESCE(source_at, created_at) < NOW() - make_interval(days => $1::int) "
+            "AND (due_date IS NULL OR due_date < CURRENT_DATE - $1::int) RETURNING id", days,
+        )
+        return len(rows)
 
     async def mark_commitment_pushed(self, cid: int, os_ref: str) -> None:
         await self._execute(

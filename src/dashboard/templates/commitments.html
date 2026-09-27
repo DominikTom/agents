@@ -6,7 +6,7 @@
 <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
   <div>
     <h2 class="page-title">Zobowiązania</h2>
-    <p class="page-subtitle">Wyłapane z rozmów: co obiecałeś, o co Cię poproszono i co inni obiecali Tobie. Zatwierdź, a trafi do MyBed OS jako Twoje prywatne zadanie.</p>
+    <p class="page-subtitle">Wyłapane z rozmów: co obiecałeś, o co Cię poproszono i co inni obiecali Tobie. Zatwierdź, a trafi do MyBed OS jako Twoje prywatne zadanie. Co godzinę AI sprawdza dalszy ciąg rozmów i samo zamyka sprawy załatwione, nieaktualne i zdublowane (powód widać w zakładkach Zrobione i Odrzucone — „Przywróć” cofa); zamyka też te, których zadanie w OS jest zrobione, i te bez ruchu od 21 dni.</p>
   </div>
   <div class="flex gap-2">
     <div class="card px-3 py-2 text-xs"><span class="text-ink-muted">Otwarte</span> <span class="ml-1 font-mono font-semibold text-ink">{{ counts.open }}</span></div>
@@ -15,7 +15,7 @@
 </div>
 
 <div class="mb-4 flex gap-5 border-b border-line">
-  {% for k, lbl in [("open", "Otwarte"), ("done", "Zrobione"), ("dismissed", "Odrzucone")] %}
+  {% for k, lbl in [("open", "Otwarte"), ("done", "Zrobione"), ("dismissed", "Nieaktualne")] %}
   <a href="/commitments?status={{ k }}" class="tab {{ 'tab-active' if status == k }}">{{ lbl }}</a>
   {% endfor %}
 </div>
@@ -42,6 +42,7 @@
           {% if c.counterpart %}{{ c.counterpart }} · {% endif %}{{ "WhatsApp" if c.source == "whatsapp" else c.source }}{% if c.chat_name %}: <a class="hover:text-ink" href="/chats/{{ c.chat_jid }}">{{ c.chat_name }}</a>{% endif %} · {{ c.source_at|ago }}
         </div>
         {% if c.context %}<div class="mt-1.5 border-l-2 border-line pl-2 text-xs italic text-ink-faint">„{{ c.context }}”</div>{% endif %}
+        {% if status != "open" and c.resolved_by == "auto" %}<div class="mt-1.5 flex items-start gap-1.5 text-xs text-ink-muted"><span class="badge shrink-0 bg-surface-2 text-ink-muted">{{ icon("sparkles", "h-3 w-3") }} zamknięte automatycznie{% if c.resolved_at %} · {{ c.resolved_at|ago }}{% endif %}</span><span>{{ c.resolution }}</span></div>{% endif %}
         {% if status == "open" %}
         <div class="mt-2.5 flex flex-wrap gap-1.5">
           {% if c.direction != "theirs" and not c.os_ref and os_configured %}
