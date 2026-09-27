@@ -10,7 +10,7 @@ from src.ingestion.whatsapp_ingest import render_body
 from src.processing.chat_digest import fingerprint
 from src.reports.engine import build_prompt
 from src.reports.profiles import DEFAULT_PROFILES, SECTION_CATALOG, merge_general, merge_profiles
-from src.reports.render import email_html, split_lead, to_html
+from src.reports.render import clean_stored_html, email_html, split_lead, to_html
 
 
 def test_markdown_render_escapes_html_and_bad_links():
@@ -310,3 +310,13 @@ def test_slack_edit_hash_and_similarity_rules():
     assert not _similar("Oferta dla Hotelu Arłamów", "Oferta dla Hotelu Gołębiewski")
     data = normalize_pushed({"pushed": ["not_in_os:0"], "not_in_os": [{"title": "Abc"}]})
     assert data["pushed_keys"] == ["not_in_os:abc"]
+
+
+def test_stored_html_from_old_reports_is_sanitised_on_display():
+    legacy = ('<pre class="fixed inset-0" id="scroller"><code>x</code></pre><p><img src="https://e.x/p.png">'
+              '<a href="javascript:alert(1)" onclick="x">a</a></p><ol start="3"><li>c</li></ol>')
+    out = clean_stored_html(legacy)
+    assert "img" not in out and "fixed" not in out and "javascript" not in out and "onclick" not in out
+    assert '<ol start="3">' in out
+    fresh = to_html("| Sklep | Przychód |\n|---|---:|\n| mybed.pl | 12 000 zł |")
+    assert clean_stored_html(fresh) == fresh

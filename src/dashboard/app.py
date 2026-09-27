@@ -249,9 +249,9 @@ async def report_detail_page(request: Request, report_id: int):
     report = await db.get_report(report_id)
     if not report:
         return RedirectResponse("/reports", status_code=302)
-    from src.reports.render import _mark_numeric_columns, to_html
+    from src.reports.render import clean_stored_html, to_html
 
-    report["html"] = _mark_numeric_columns(report.get("html") or to_html(report["body"]))
+    report["html"] = clean_stored_html(report["html"]) if report.get("html") else to_html(report["body"])
     from src.reports.profiles import SECTION_CATALOG, load_profiles
 
     profile = (await load_profiles(db)).get(report["agent_name"]) or {}

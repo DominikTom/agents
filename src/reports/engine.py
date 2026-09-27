@@ -13,7 +13,7 @@ from src.outputs.email_output import email_configured, send_email
 from src.reports.kpi import kpi_data, kpi_email_html, kpi_markdown
 from src.reports.lineage import sources_line
 from src.reports.profiles import LENGTHS, SECTION_CATALOG, load_general, load_profiles
-from src.reports.render import email_html, split_lead, to_html
+from src.reports.render import clean_stored_html, email_html, split_lead, to_html
 from src.reports.sections import ReportContext, dumps, gather_sections, report_window
 from src.storage.database import Database
 
@@ -221,7 +221,7 @@ class ReportEngine:
                         title=title,
                         lead=lead,
                         kpi_html=kpi_email_html(meta.get("kpi")),
-                        body_html=html_body,
+                        body_html=clean_stored_html(html_body),
                         sources=meta.get("sources") or "",
                         url=url,
                         footer="Wygenerowane przez MyBed Agents. Zakres, liczby i godzinę raportu zmienisz w panelu: "

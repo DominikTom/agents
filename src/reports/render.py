@@ -51,6 +51,11 @@ def to_html(text: str) -> str:
     return _mark_numeric_columns(_sanitize(out))
 
 
+def clean_stored_html(content: str) -> str:
+    """HTML read back from the database (reports saved before the sanitiser existed) gets the same allow-list."""
+    return _mark_numeric_columns(_sanitize(content or ""))
+
+
 def _mark_numeric_columns(content: str) -> str:
     """class="num" on cells of numeric table columns — the panel right-aligns them (e-mail restyles inline)."""
     def table(m: re.Match) -> str:
