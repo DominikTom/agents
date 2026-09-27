@@ -996,14 +996,13 @@ class Database:
             )
         elif source == "slack":
             # alias is the Slack user id (Ludzie → nierozpoznani autorzy) or, typed by hand, a full name
+            # Slack aliases are user ids (the panel maps a typed name to its id) — same rule as ingestion
             await self._execute(
-                "UPDATE events SET sender_entity_id = $1 "
-                "WHERE source = 'slack' AND (metadata->>'user_id' = $2 OR lower(metadata->>'user_name') = lower($2))",
+                "UPDATE events SET sender_entity_id = $1 WHERE source = 'slack' AND metadata->>'user_id' = $2",
                 entity_id, alias_name,
             )
             await self._execute(
-                "UPDATE team_updates SET entity_id = $1, fingerprint = NULL "
-                "WHERE person_key = $2 OR lower(person_name) = lower($2)",
+                "UPDATE team_updates SET entity_id = $1, fingerprint = NULL WHERE person_key = $2",
                 entity_id, alias_name,
             )
         elif source == "asana":
@@ -1370,7 +1369,10 @@ class Database:
             "  || CASE WHEN EXCLUDED.metadata->>'user_name' = EXCLUDED.metadata->>'user_id' "
             "          THEN jsonb_build_object('user_name', events.metadata->>'user_name') ELSE '{}'::jsonb END, "
             "sender_entity_id = COALESCE(EXCLUDED.sender_entity_id, events.sender_entity_id) "
-            "WHERE events.content_hash IS DISTINCT FROM EXCLUDED.content_hash "
+            # text changed — unless this run resolved fewer @mentions than the stored copy (users.info hiccup)
+            "WHERE (events.content_hash IS DISTINCT FROM EXCLUDED.content_hash "
+            "       AND jsonb_array_length(COALESCE(EXCLUDED.metadata->'unresolved', '[]'::jsonb)) "
+            "           <= jsonb_array_length(COALESCE(events.metadata->'unresolved', '[]'::jsonb))) "
             "   OR (events.sender_entity_id IS NULL AND EXCLUDED.sender_entity_id IS NOT NULL) "
             "   OR (events.metadata->>'user_name' = events.metadata->>'user_id' "
             "       AND EXCLUDED.metadata->>'user_name' <> EXCLUDED.metadata->>'user_id') "

@@ -111,7 +111,9 @@ class TeamUpdates:
         done = skipped = 0
         failed: list[str] = []
         for uid, msgs in groups.items():
-            fp = fingerprint([m["id"] for m in msgs], [m["body"] or "" for m in msgs])
+            # names too: an author name repaired after a users.info failure refreshes the card
+            fp = fingerprint([m["id"] for m in msgs],
+                             [f"{m['metadata'].get('user_name')}:{m['body'] or ''}" for m in msgs])
             old = existing.get(uid)
             if not force and old and old.get("fingerprint") == fp:
                 # same Slack content: re-analyse only when OS came back for a linked person not compared before
@@ -120,7 +122,7 @@ class TeamUpdates:
                     skipped += 1
                     continue
             try:
-                await self._analyze(day, uid, msgs, fp, snapshot, (old or {}).get("data") or {})
+                await self._analyze(day, uid, msgs, fp, snapshot, normalize_pushed((old or {}).get("data") or {}))
                 done += 1
             except Exception as e:
                 logger.warning(f"Team update {uid} {day}: {e}")
@@ -205,9 +207,11 @@ class TeamUpdates:
         result["os_updates"] = updates
         if not os_checked:
             result["not_in_os"] = []
-        else:  # drop re-worded repeats of items already sent to OS
-            result["not_in_os"] = [x for x in result.get("not_in_os", [])
-                                   if not any(_similar(x.get("title"), t) for t in pushed_titles)]
+        else:  # never drop work silently: an item resembling one already sent to OS is only annotated
+            for x in result.get("not_in_os", []):
+                similar = next((t for t in pushed_titles if _similar(x.get("title"), t)), None)
+                if similar and suggestion_key("not_in_os", x) != suggestion_key("not_in_os", {"title": similar}):
+                    x["similar_to_pushed"] = similar
         result["os_linked"] = bool(os_id)
         result["os_checked"] = os_checked
         result["os_open_tasks"] = sum(1 for t in tasks if t["status"] != "Done")
@@ -223,13 +227,28 @@ class TeamUpdates:
         })
 
 
+def normalize_pushed(data: dict) -> dict:
+    """Rows from the first version stored pushes as 'kind:index' — turn them into content keys once."""
+    legacy = data.get("pushed") or []
+    if legacy and not data.get("pushed_keys"):
+        keys = []
+        for marker in legacy:
+            kind, _, idx = str(marker).rpartition(":")
+            items = data.get("os_updates" if kind == "os_update" else "not_in_os") or []
+            if idx.isdigit() and int(idx) < len(items):
+                keys.append(suggestion_key(kind, items[int(idx)]))
+        data["pushed_keys"] = keys
+    return data
+
+
 def _words(text: str | None) -> set[str]:
     return {w for w in re.findall(r"\w+", (text or "").lower()) if len(w) > 2}
 
 
 def _similar(a: str | None, b: str | None) -> bool:
+    """Near-identical titles only (Jaccard over words) — used to annotate, never to hide an item."""
     wa, wb = _words(a), _words(b)
-    return bool(wa and wb) and len(wa & wb) / min(len(wa), len(wb)) >= 0.7
+    return bool(wa and wb) and len(wa & wb) / len(wa | wb) >= 0.8
 
 
 def suggestion_key(kind: str, item: dict) -> str:
@@ -282,6 +301,8 @@ async def team_overview(db: Database, day: date) -> dict:
     from src.common.timeutil import now
 
     updates = await db.get_team_updates(day, day)
+    for u in updates:
+        normalize_pushed(u["data"] or {})
     channels = ((await db.get_setting("slack", {})) or {}).get("channels", {}) or {}
     all_daily = await daily_channel_ids(db)
     daily_ids = await daily_channel_ids(db, members_only=True)

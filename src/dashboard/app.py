@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
@@ -812,7 +813,7 @@ async def team_suggest(request: Request, day: str = Form(...), person_key: str =
     if not authed(request):
         return unauthorized()
     from src.connectors.os_mybed import OSClient
-    from src.processing.team_updates import suggestion_key
+    from src.processing.team_updates import normalize_pushed, suggestion_key
     from src.reports.profiles import load_general
 
     db = get_db_sync()
@@ -827,7 +828,7 @@ async def team_suggest(request: Request, day: str = Form(...), person_key: str =
     if not rows:
         return JSONResponse({"error": "not found"}, status_code=404)
     u = rows[0]
-    payload = u["data"] or {}
+    payload = normalize_pushed(u["data"] or {})
     if kind not in ("os_update", "not_in_os"):
         return JSONResponse({"error": "bad item"}, status_code=400)
     items = payload.get("os_updates" if kind == "os_update" else "not_in_os") or []
@@ -897,7 +898,8 @@ async def people_page(request: Request):
         u["suggested"] = await db.resolve_entity_strict("_none_", u["sender_name"] or "")
     slack_names = {r["user_id"]: r["user_name"] for r in await db.get_slack_user_names()}
     return render(request, "people.html", "people", entities=entity_map, unmapped=unmapped[:60],
-                  unmapped_slack=unmapped_slack[:40], slack_names=slack_names)
+                  unmapped_slack=unmapped_slack[:40], slack_names=slack_names,
+                  error=request.query_params.get("error"))
 
 
 @app.post("/api/entity/alias")
@@ -905,8 +907,15 @@ async def add_entity_alias(request: Request, entity_id: int = Form(...), source:
     if not authed(request):
         return unauthorized()
     db = get_db_sync()
-    await db.upsert_alias(int(entity_id), source, alias_name.strip())
-    await db.resolve_unlinked_events(source, alias_name.strip(), int(entity_id))
+    alias = alias_name.strip()
+    if source == "slack" and not re.fullmatch(r"[UW][A-Z0-9]{6,}", alias):
+        # Slack links are kept by user id (names can be changed by anyone) — map the typed name to its id
+        ids = [r["user_id"] for r in await db.get_slack_user_names() if (r["user_name"] or "").lower() == alias.lower()]
+        if len(ids) != 1:
+            return RedirectResponse("/people?error=slack_name", status_code=302)
+        alias = ids[0]
+    await db.upsert_alias(int(entity_id), source, alias)
+    await db.resolve_unlinked_events(source, alias, int(entity_id))
     return RedirectResponse("/people", status_code=302)
 
 

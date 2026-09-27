@@ -91,9 +91,11 @@ class SlackIngestor:
         for msg in await self.api.history(cid, oldest):
             new += await self._safe_store(cid, cfg, msg)
             latest_reply = float(msg.get("latest_reply") or 0)
-            # fetch a thread when it has replies we have not stored yet, or recent activity (edited replies)
+            # fetch a thread when it has replies we have not stored yet, recent activity (edited replies),
+            # or — once an hour — any thread in the re-check window (late edits of older replies)
             if msg.get("reply_count") and (latest_reply > seen_replies.get(msg["ts"], 0.0)
-                                           or latest_reply > now - REPLY_EDIT_WINDOW):
+                                           or latest_reply > now - REPLY_EDIT_WINDOW
+                                           or time.gmtime(now).tm_min < 10):
                 for reply in await self.api.replies(cid, msg["ts"]):
                     new += await self._safe_store(cid, cfg, reply, thread_ts=msg["ts"])
         return new
@@ -124,6 +126,7 @@ class SlackIngestor:
         if msg.get("user") in (self.bot_user_id, "USLACKBOT"):
             return None
         text = await self.api.clean_text(msg.get("text") or "")
+        unresolved = list(self.api.last_unresolved)
         files = [f.get("name") or f.get("title") or "plik" for f in msg.get("files") or []]
         if files:
             text = (text + "\n" if text else "") + "\n".join(f"[plik: {f}]" for f in files)
@@ -142,7 +145,7 @@ class SlackIngestor:
             # hash of Slack's own text + edit stamp: a transient users.info failure (mention rendered as an id)
             # is not an edit and must not rewrite the stored message
             content_hash=hashlib.sha1(f"{msg.get('text') or ''}|{(msg.get('edited') or {}).get('ts', '')}|"
-                                      f"{len(msg.get('files') or [])}".encode()).hexdigest()[:16],
+                                      f"{len(msg.get('files') or [])}|{','.join(unresolved)}".encode()).hexdigest()[:16],
             metadata={
                 "channel_id": cid,
                 "channel_name": cfg.get("name"),
@@ -151,7 +154,9 @@ class SlackIngestor:
                 "user_name": user["name"],
                 "ts": ts,
                 "thread_ts": thread_ts or msg.get("thread_ts"),
-                "is_reply": bool(thread_ts),
+                # a reply also broadcast to the channel shows up in history too — it stays a reply
+                "is_reply": bool(thread_ts) or bool(msg.get("thread_ts") and msg.get("thread_ts") != msg.get("ts")),
+                "unresolved": unresolved,
                 "reply_count": msg.get("reply_count", 0),
                 "edited": bool(msg.get("edited")),
             },

@@ -294,3 +294,19 @@ def test_suggestion_key_is_content_based():
 
     assert suggestion_key("os_update", {"task_id": "t1", "suggested_status": "Done"}) == "os_update:t1:Done"
     assert suggestion_key("not_in_os", {"title": "  Wyłączenie  widoku "}) == "not_in_os:wyłączenie widoku"
+
+
+def test_sanitizer_keeps_list_numbering_and_drops_everything_else():
+    html = to_html("1. A\n2. B\n\nkomentarz\n\n3. C\n\n```{ .fixed #x }\nkod\n```\n\n![x](http://evil/p.png)")
+    assert '<ol start="3">' in html and "<img" not in html and "fixed" not in html
+    mail = email_html(label="R", title="T", body_html=html, url=None, footer="f")
+    assert 'start="3"' in mail
+
+
+def test_slack_edit_hash_and_similarity_rules():
+    from src.processing.team_updates import _similar, normalize_pushed
+
+    assert _similar("Wyłączenie widoku showroomów", "wyłączenie widoku  showroomów")
+    assert not _similar("Oferta dla Hotelu Arłamów", "Oferta dla Hotelu Gołębiewski")
+    data = normalize_pushed({"pushed": ["not_in_os:0"], "not_in_os": [{"title": "Abc"}]})
+    assert data["pushed_keys"] == ["not_in_os:abc"]

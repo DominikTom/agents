@@ -123,14 +123,17 @@ document.addEventListener('click', async (e) => {
   window.addEventListener('pagehide', () => {
     try { sessionStorage.setItem(key, String(scroller.scrollTop)) } catch (e) {}
   })
-  // Keyboard scrolling right after load: the first scroll key goes to the content (Tab order is untouched)
+  // Keyboard scrolling right after load (before any click): scroll keys go to the content, Tab order untouched.
+  // After the first click the browser scrolls whatever was clicked (#scroller, chat pane, preview) natively.
   const KEYS = { PageDown: 1, PageUp: -1, ' ': 1, ArrowDown: 0.15, ArrowUp: -0.15, End: 99, Home: -99 }
-  document.addEventListener('keydown', (e) => {
+  const onKey = (e) => {
     if (document.activeElement !== document.body || !(e.key in KEYS) || e.altKey || e.ctrlKey || e.metaKey) return
     e.preventDefault()
     const step = KEYS[e.key] * (e.shiftKey && e.key === ' ' ? -1 : 1)
     scroller.scrollBy({ top: Math.abs(step) >= 99 ? step * scroller.scrollHeight : step * scroller.clientHeight * 0.85 })
-  })
+  }
+  document.addEventListener('keydown', onKey)
+  document.addEventListener('pointerdown', () => document.removeEventListener('keydown', onKey), { once: true })
 })()
 
 // Wide report tables scroll sideways on phones (also in the Studio preview, rendered later)

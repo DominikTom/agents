@@ -71,7 +71,8 @@
     {% for c in kpi_cards(kpi) %}
     <div class="min-w-0 rounded-xl border border-line bg-canvas/70 px-3.5 py-3">
       <div class="truncate text-xs font-medium text-ink-muted">{{ c.label }}</div>
-      <div class="mt-1 truncate font-mono text-lg font-semibold tabular-nums text-ink {{ '' if compact else 'sm:text-xl' }}">{{ c.value }}</div>
+      {# never truncate a number: long values get a smaller size and may wrap before "zł" #}
+      <div class="mt-1 break-words font-mono font-semibold tabular-nums text-ink {{ 'text-base' if compact or c.value|length > 10 else 'text-lg sm:text-xl' }}">{{ c.value|replace("\u00a0zł", " zł") }}</div>
       {% if c.has_pct %}<span class="mt-1.5 inline-flex rounded-md px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums {{ tone_cls[c.tone] }}">{{ c.pct }}</span>{% endif %}
     </div>
     {% endfor %}

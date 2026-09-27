@@ -108,6 +108,8 @@
         <span class="mt-0.5 text-amber-600">{{ icon("plus", "h-3.5 w-3.5") }}</span>
         <div class="min-w-0 flex-1">
           <span class="font-medium text-ink">{{ x.title }}</span> <span class="text-xs text-ink-muted">— nie ma w OS{% if x.project %} · {{ x.project }}{% endif %}</span>
+          {% if x.why %}<div class="text-xs text-ink-muted">{{ x.why }}</div>{% endif %}
+          {% if x.similar_to_pushed %}<div class="text-xs text-amber-700">Podobne do wysłanego: „{{ x.similar_to_pushed }}”</div>{% endif %}
         </div>
         {% if key in (d.pushed_keys or []) %}<span class="badge bg-emerald-50 text-emerald-700">w OS</span>
         {% elif can_suggest %}<button class="btn-ghost !px-2 !py-1 text-xs" data-day="{{ day.isoformat() }}" data-person="{{ u.person_key }}" data-kind="not_in_os" data-key="{{ key }}" onclick="suggest(this)">Do OS</button>{% endif %}

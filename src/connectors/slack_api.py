@@ -60,6 +60,7 @@ class SlackAPI:
         self.token = token if token is not None else (get_env_optional("SLACK_BOT_TOKEN") or "")
         self._client = None
         self._users: dict[str, dict] = {}
+        self.last_unresolved: list[str] = []  # mention ids clean_text could not turn into names
 
     @property
     def configured(self) -> bool:
@@ -170,8 +171,11 @@ class SlackAPI:
     async def clean_text(self, text: str) -> str:
         """Slack markup → readable text: mentions, channel links, URLs, entities."""
         text = text or ""
-        for uid in set(re.findall(r"<@([UW][A-Z0-9]+)(?:\|[^>]*)?>", text)):
+        self.last_unresolved = []
+        for uid in sorted(set(re.findall(r"<@([UW][A-Z0-9]+)(?:\|[^>]*)?>", text))):
             name = (await self.user(uid))["name"]
+            if name == uid:
+                self.last_unresolved.append(uid)  # users.info failed — the stored text keeps the raw id for now
             # function replacement: a name is data, never a regex template (backslashes, \g<…>)
             text = re.sub(rf"<@{uid}(?:\|[^>]*)?>", lambda _m, repl=f"@{name}": repl, text)
         text = re.sub(r"<#[CG][A-Z0-9]+\|([^>]*)>", r"#\1", text)

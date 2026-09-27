@@ -11,6 +11,9 @@
   <button class="btn-secondary" data-run="/api/jobs/os_people_sync/run" data-msg="Synchronizuję ludzi z MyBed OS" data-reload="5000">{{ icon("refresh-cw") }} Pobierz z OS</button>
 </div>
 
+{% if error == "slack_name" %}
+<div class="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">Nie znalazłem na Slacku jednej osoby o takiej nazwie. Wpisz nazwę dokładnie tak jak na Slacku albo przypisz autora z listy „Nierozpoznani autorzy na Slacku”.</div>
+{% endif %}
 {% for src, rows, title, hint in [("whatsapp", unmapped, "Nierozpoznani nadawcy WhatsApp", "Przypisz ich do osób — ich wiadomości dostaną nazwisko i rolę w raportach."), ("slack", unmapped_slack, "Nierozpoznani autorzy na Slacku", "Przypisz ich do osób z OS — wtedy ich raporty dnia porównamy z ich zadaniami w OS.")] %}
 {% if rows %}
 <section class="card mb-5 overflow-hidden">

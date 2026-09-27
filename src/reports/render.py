@@ -35,6 +35,9 @@ def _sanitize(out: str) -> str:
         if name in ("td", "th"):
             align = _TABLE_CELL_STYLE.search(attrs)
             return f"<{name}{align.group(0) if align else ''}>"
+        if name == "ol":  # a numbered list resumed after a paragraph keeps its numbering
+            start = re.search(r'\sstart="(\d{1,4})"', attrs)
+            return f'<ol start="{start.group(1)}">' if start else "<ol>"
         return f"<{name}>"
 
     return re.sub(r"<([a-zA-Z][a-zA-Z0-9]*)(\s[^>]*)?>", tag, out)
@@ -108,6 +111,7 @@ _INLINE = [
     (r"<p>", f'<p style="margin:0 0 10px;font-size:14px;line-height:22px;color:{SOFT};">'),
     (r"<ul>", '<ul style="margin:0 0 12px;padding-left:20px;">'),
     (r"<ol>", '<ol style="margin:0 0 12px;padding-left:20px;">'),
+    (r'<ol start="(\d+)">', r'<ol start="\1" style="margin:0 0 12px;padding-left:20px;">'),
     (r"<li>", f'<li style="margin:0 0 6px;font-size:14px;line-height:22px;color:{SOFT};">'),
     (r"<strong>", f'<strong style="color:{INK};font-weight:600;">'),
     (r"<table>", '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;margin:6px 0 14px;font-size:13px;">'),
