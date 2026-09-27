@@ -95,7 +95,8 @@ class DashClient:
             missing.add("sales")
         if isinstance(meta, Exception) or not any(a.get("date") == ref_iso for a in meta):
             missing.add("meta")
-        if isinstance(google, Exception) or not any(g.get("date") == ref_iso and _f(g.get("ad_cost")) for g in google):
+        # late = no GA4 rows at all for ref; a real 0 zł day (paused campaigns, declined card) stays 0 zł
+        if isinstance(google, Exception) or not any(g.get("date") == ref_iso for g in google):
             missing.add("google")
         return build_overview(rev, ads, [] if isinstance(rooms, Exception) else rooms, ref, missing=missing)
 
@@ -304,18 +305,28 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
         if rd == ref.isoformat():
             agg["revenue_day"] += _f(r.get("revenue_pln"))
 
+    total = {
+        **y,
+        "aov": round(y["revenue"] / y["orders"], 2) if y["orders"] else None,
+        "vs_prev_day_pct": _pct(y["revenue"], day_total(prev)["revenue"]),
+        "vs_same_weekday_pct": _pct(y["revenue"], day_total(same_wd)["revenue"]),
+    }
+    week_to_date = {**wtd, "vs_prev_week_pct": _pct(wtd["revenue"], prev_wtd["revenue"])}
+    last_7_days = {**last7, "vs_prev_7_pct": _pct(last7["revenue"], prev7["revenue"])}
+    if "sales" in missing:
+        # yesterday not loaded yet: no fake zeros / −100% anywhere (Pulpit tiles, sales section)
+        total = {k: None for k in total}
+        shops = [{**sh, **{k: None for k in ("orders", "revenue_pln", "revenue_original", "aov_pln",
+                                             "vs_prev_day_pct", "vs_same_weekday_pct")}} for sh in shops]
+        week_to_date["vs_prev_week_pct"] = None
+        last_7_days["vs_prev_7_pct"] = None
     return {
         "date": ref.isoformat(),
-        "total": {
-            **y,
-            "aov": round(y["revenue"] / y["orders"], 2) if y["orders"] else None,
-            "vs_prev_day_pct": _pct(y["revenue"], day_total(prev)["revenue"]),
-            "vs_same_weekday_pct": _pct(y["revenue"], day_total(same_wd)["revenue"]),
-        },
+        "total": total,
         "shops": shops,
-        "week_to_date": {**wtd, "vs_prev_week_pct": _pct(wtd["revenue"], prev_wtd["revenue"])},
+        "week_to_date": week_to_date,
         "month_to_date": mtd,
-        "last_7_days": {**last7, "vs_prev_7_pct": _pct(last7["revenue"], prev7["revenue"])},
+        "last_7_days": last_7_days,
         "marketing": {
             "spend_day": round(spend_y, 2),
             "spend_7d": spend7,

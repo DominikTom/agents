@@ -28,9 +28,9 @@
       </div>
       <select name="entity_id" class="input !w-auto !py-1.5 text-[13px]" required>
         <option value="">To jest…</option>
-        {% for e in entities %}<option value="{{ e.id }}">{{ e.display_name }}</option>{% endfor %}
+        {% for e in entities %}<option value="{{ e.id }}" {{ 'selected' if u.suggested == e.id }}>{{ e.display_name }}</option>{% endfor %}
       </select>
-      <button class="btn-secondary !py-1.5 text-xs">Przypisz</button>
+      <button class="btn-secondary !py-1.5 text-xs">{{ "Potwierdź" if u.suggested else "Przypisz" }}</button>
     </form>
     {% endfor %}
   </div>

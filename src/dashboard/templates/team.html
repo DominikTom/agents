@@ -29,6 +29,9 @@
 {% if o.missing_status in why %}
 <p class="mb-3 flex items-center gap-2 text-xs text-ink-muted">{{ icon("info", "h-3.5 w-3.5 shrink-0") }} {{ why[o.missing_status] }}</p>
 {% endif %}
+{% if o.unreadable_channels %}
+<p class="mb-3 flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">{{ icon("triangle-alert", "h-3.5 w-3.5 shrink-0") }} Bot nie czyta kanałów: {% for c in o.unreadable_channels %}#{{ c }}{% if not loop.last %}, {% endif %}{% endfor %} — raporty z nich nie są brane pod uwagę. <a class="font-semibold underline" href="/sources/slack">Źródła → Slack</a></p>
+{% endif %}
 {% if o.not_analyzed %}
 <p class="mb-3 flex items-center gap-2 rounded-xl bg-surface-2 px-3 py-2 text-xs text-ink-muted">{{ icon("clock", "h-3.5 w-3.5 shrink-0") }} Raport jest na Slacku, ale AI go jeszcze nie przeanalizowało: {{ o.not_analyzed|join(", ") }}. Kliknij „Przeanalizuj”.</p>
 {% endif %}
@@ -64,7 +67,8 @@
           {% if d.plan_quality == "missing" %}<span class="badge bg-amber-50 text-amber-700">brak planu</span>
           {% elif d.plan_quality == "vague" %}<span class="badge bg-surface-2 text-ink-muted">plan ogólny</span>{% endif %}
           {% if d.blockers %}<span class="badge bg-red-50 text-red-700">blokada</span>{% endif %}
-          {% if not d.os_linked %}<span class="badge bg-surface-2 text-ink-muted" title="Dopasuj osobę w zakładce Ludzie">bez powiązania z OS</span>{% endif %}
+          {% if not d.os_linked %}<span class="badge bg-surface-2 text-ink-muted" title="Dopasuj osobę w zakładce Ludzie">bez powiązania z OS</span>
+          {% elif d.os_checked is sameas false %}<span class="badge bg-surface-2 text-ink-muted" title="MyBed OS był niedostępny podczas analizy">OS nie sprawdzony</span>{% endif %}
         </div>
         <div class="mt-0.5 text-xs text-ink-muted">{% for c in u.channels %}#{{ c }}{% if not loop.last %}, {% endif %}{% endfor %}{% if u.first_message_at %} · {{ u.first_message_at|hm }}{% endif %}{% if d.hours %} · {{ d.hours }}{% endif %}</div>
       </div>
@@ -82,7 +86,7 @@
       {% endfor %}
       {% if d.focus %}<p class="text-xs text-ink-muted"><span class="font-medium text-ink-soft">Focus:</span> {{ d.focus }}</p>{% endif %}
     </div>
-    {% if d.os_updates or d.not_in_os %}
+    {% if d.os_updates or d.not_in_os or d.pushed_items %}
     <div class="space-y-2 border-t border-line bg-canvas/60 px-4 py-3">
       <div class="text-xs font-medium text-ink-muted">Rozjazd z MyBed OS</div>
       {% for x in d.os_updates %}
@@ -109,6 +113,7 @@
         {% elif can_suggest %}<button class="btn-ghost !px-2 !py-1 text-xs" data-day="{{ day.isoformat() }}" data-person="{{ u.person_key }}" data-kind="not_in_os" data-key="{{ key }}" onclick="suggest(this)">Do OS</button>{% endif %}
       </div>
       {% endfor %}
+      {% if d.pushed_items %}<p class="text-[11px] text-ink-faint">Wysłane do OS: {% for p in d.pushed_items %}{{ p.title }}{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
       {% if not can_suggest %}<p class="text-[11px] text-ink-faint">Wysyłanie propozycji do OS włączysz w Studio → O mnie i ustawienia („Propozycje AI”).</p>{% endif %}
     </div>
     {% endif %}

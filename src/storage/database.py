@@ -891,14 +891,16 @@ class Database:
 
     async def get_slack_user_names(self) -> list[dict]:
         return await self._fetchall(
-            "SELECT metadata->>'user_id' AS user_id, MAX(metadata->>'user_name') AS user_name FROM events "
+            "SELECT metadata->>'user_id' AS user_id, "
+            "COALESCE(MAX(NULLIF(metadata->>'user_name', metadata->>'user_id')), metadata->>'user_id') AS user_name FROM events "
             "WHERE source = 'slack' AND metadata->>'user_id' IS NOT NULL GROUP BY 1"
         )
 
     async def get_unmapped_slack_authors(self) -> list[dict]:
         """Unlinked Slack authors, keyed by their (immutable) user id; the name is for display."""
         return await self._fetchall(
-            "SELECT metadata->>'user_id' AS alias_key, MAX(metadata->>'user_name') AS sender_name, "
+            "SELECT metadata->>'user_id' AS alias_key, "
+            "COALESCE(MAX(NULLIF(metadata->>'user_name', metadata->>'user_id')), metadata->>'user_id') AS sender_name, "
             "COUNT(*) AS message_count, MAX(timestamp) AS last_seen "
             "FROM events WHERE source = 'slack' AND sender_entity_id IS NULL AND metadata->>'user_id' IS NOT NULL "
             "GROUP BY 1 ORDER BY message_count DESC"
@@ -1323,6 +1325,12 @@ class Database:
         )
         return {r["agent_name"]: r for r in rows}
 
+    async def last_success_at(self, job: str) -> datetime | None:
+        row = await self._fetchone(
+            "SELECT MAX(ran_at) AS ts FROM agent_runs WHERE agent_name = $1 AND status = 'success'", job
+        )
+        return row["ts"] if row else None
+
     async def last_ingest_at(self, source: str) -> datetime | None:
         row = await self._fetchone(
             "SELECT MAX(ingested_at) AS ts FROM events WHERE source = $1", source
@@ -1364,6 +1372,8 @@ class Database:
             "sender_entity_id = COALESCE(EXCLUDED.sender_entity_id, events.sender_entity_id) "
             "WHERE events.content_hash IS DISTINCT FROM EXCLUDED.content_hash "
             "   OR (events.sender_entity_id IS NULL AND EXCLUDED.sender_entity_id IS NOT NULL) "
+            "   OR (events.metadata->>'user_name' = events.metadata->>'user_id' "
+            "       AND EXCLUDED.metadata->>'user_name' <> EXCLUDED.metadata->>'user_id') "
             "RETURNING (xmax = 0) AS inserted",
             source_id, timestamp, title, body, sender_entity_id, category, content_hash,
             json.dumps(metadata, default=str),
@@ -1379,6 +1389,17 @@ class Database:
             channel_id,
         )
         return {r["t"]: r["last"] for r in rows if r["t"]}
+
+    async def resolve_alias(self, source: str, alias: str) -> int | None:
+        """Only an explicit alias (e-mail synced from OS, Slack user id confirmed in Ludzie) — never a name guess."""
+        alias = (alias or "").strip()
+        if not alias:
+            return None
+        row = await self._fetchone(
+            "SELECT entity_id FROM entity_aliases WHERE source = $1 AND lower(alias_name) = lower($2) LIMIT 1",
+            source, alias,
+        )
+        return row["entity_id"] if row else None
 
     async def resolve_entity_strict(self, source: str, name: str) -> int | None:
         """Alias for the source, then an exact full-name match — no first-name guessing."""
@@ -1416,7 +1437,8 @@ class Database:
         if not channel_ids:
             return []
         return await self._fetchall(
-            "SELECT metadata->>'user_id' AS user_id, MAX(metadata->>'user_name') AS user_name, "
+            "SELECT metadata->>'user_id' AS user_id, "
+            "COALESCE(MAX(NULLIF(metadata->>'user_name', metadata->>'user_id')), metadata->>'user_id') AS user_name, "
             "COUNT(DISTINCT (timestamp AT TIME ZONE 'Europe/Warsaw')::date) AS days, MAX(timestamp) AS last_at "
             "FROM events WHERE source = 'slack' AND timestamp >= $1 AND ($3::timestamptz IS NULL OR timestamp < $3) "
             "AND metadata->>'channel_id' = ANY($2::text[]) "
@@ -1441,7 +1463,16 @@ class Database:
             "VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9::jsonb, $10, NOW()) "
             "ON CONFLICT (day, person_key) DO UPDATE SET person_name = EXCLUDED.person_name, "
             "entity_id = EXCLUDED.entity_id, os_person_id = EXCLUDED.os_person_id, channels = EXCLUDED.channels, "
-            "event_ids = EXCLUDED.event_ids, fingerprint = EXCLUDED.fingerprint, data = EXCLUDED.data, "
+            "event_ids = EXCLUDED.event_ids, fingerprint = EXCLUDED.fingerprint, "
+            # pushed markers are merged at write time: a push during a (slow) re-analysis is never lost
+            "data = EXCLUDED.data || jsonb_build_object("
+            "  'pushed_keys', (SELECT COALESCE(jsonb_agg(DISTINCT k), '[]'::jsonb) FROM ("
+            "     SELECT jsonb_array_elements_text(COALESCE(team_updates.data->'pushed_keys', '[]'::jsonb)) "
+            "     UNION SELECT jsonb_array_elements_text(COALESCE(EXCLUDED.data->'pushed_keys', '[]'::jsonb))) t(k)), "
+            "  'pushed_items', COALESCE(team_updates.data->'pushed_items', '[]'::jsonb) "
+            "     || (SELECT COALESCE(jsonb_agg(i), '[]'::jsonb) FROM jsonb_array_elements("
+            "          COALESCE(EXCLUDED.data->'pushed_items', '[]'::jsonb)) i "
+            "        WHERE NOT (COALESCE(team_updates.data->'pushed_items', '[]'::jsonb) @> jsonb_build_array(i)))), "
             "first_message_at = EXCLUDED.first_message_at, generated_at = NOW()",
             u["day"], u["person_key"], u.get("person_name"), u.get("entity_id"), u.get("os_person_id"),
             json.dumps(u.get("channels") or []), json.dumps(u.get("event_ids") or []), u.get("fingerprint"),
@@ -1456,10 +1487,14 @@ class Database:
         )
         return {r["ch"]: r for r in rows if r["ch"]}
 
-    async def set_team_update_data(self, day: date, person_key: str, data: dict) -> None:
+    async def add_team_update_pushed(self, day: date, person_key: str, key: str, item: dict) -> None:
+        """Mark one suggestion as sent to OS — an in-place append, so a concurrent re-analysis can't drop it."""
         await self._execute(
-            "UPDATE team_updates SET data = $3::jsonb WHERE day = $1 AND person_key = $2",
-            day, person_key, json.dumps(data, default=str),
+            "UPDATE team_updates SET data = jsonb_set(jsonb_set(data, '{pushed_keys}', "
+            "  COALESCE(data->'pushed_keys', '[]'::jsonb) || to_jsonb($3::text)), "
+            "  '{pushed_items}', COALESCE(data->'pushed_items', '[]'::jsonb) || $4::jsonb) "
+            "WHERE day = $1 AND person_key = $2",
+            day, person_key, key, json.dumps([item], default=str),
         )
 
     async def get_team_updates(self, start: date, end: date) -> list[dict]:

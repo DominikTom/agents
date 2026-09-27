@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 FIRST_RUN_DAYS = 7          # history loaded the first time a channel is read
 RECHECK_DAYS = 4            # edits and new thread replies re-checked on every run (covers a weekend)
+REPLY_EDIT_WINDOW = 6 * 3600  # threads active in the last hours are re-read, so edited replies are picked up
 # Only real user messages; everything else (joins, tombstones of deleted posts, bots…) is skipped
 KEEP_SUBTYPES = {None, "thread_broadcast", "file_share", "me_message"}
 
@@ -90,8 +91,9 @@ class SlackIngestor:
         for msg in await self.api.history(cid, oldest):
             new += await self._safe_store(cid, cfg, msg)
             latest_reply = float(msg.get("latest_reply") or 0)
-            # fetch a thread only when it has replies we have not stored yet
-            if msg.get("reply_count") and latest_reply > seen_replies.get(msg["ts"], 0.0):
+            # fetch a thread when it has replies we have not stored yet, or recent activity (edited replies)
+            if msg.get("reply_count") and (latest_reply > seen_replies.get(msg["ts"], 0.0)
+                                           or latest_reply > now - REPLY_EDIT_WINDOW):
                 for reply in await self.api.replies(cid, msg["ts"]):
                     new += await self._safe_store(cid, cfg, reply, thread_ts=msg["ts"])
         return new
@@ -107,17 +109,14 @@ class SlackIngestor:
             return 0
 
     async def _resolve_author(self, user: dict) -> int | None:
-        """E-mail (with users:read.email) → alias by Slack user id (Ludzie) → exact full name. No first-name guesses."""
+        """Immutable identifiers only: the e-mail (users:read.email; aliases synced from OS) or a Slack user id
+        the CEO linked in Ludzie. Display names can be changed by anyone, so a name match is only suggested
+        in Ludzie — never applied automatically."""
         if user.get("email"):
-            eid = await self.db.resolve_entity_strict("gmail", user["email"])
+            eid = await self.db.resolve_alias("gmail", user["email"])
             if eid:
                 return eid
-        eid = await self.db.resolve_entity_strict("slack", user["id"])
-        if eid:
-            return eid
-        if user.get("name") and user["name"] != user["id"]:
-            return await self.db.resolve_entity_strict("slack", user["name"])
-        return None
+        return await self.db.resolve_alias("slack", user["id"])
 
     async def _store(self, cid: str, cfg: dict, msg: dict, thread_ts: str | None = None) -> str | None:
         if msg.get("subtype") not in KEEP_SUBTYPES or msg.get("hidden") or msg.get("bot_id") or not msg.get("user"):
@@ -140,7 +139,10 @@ class SlackIngestor:
             body=text,
             sender_entity_id=entity_id,
             category="daily" if cfg.get("daily") else "channel",
-            content_hash=hashlib.sha1(text.encode()).hexdigest()[:16],
+            # hash of Slack's own text + edit stamp: a transient users.info failure (mention rendered as an id)
+            # is not an edit and must not rewrite the stored message
+            content_hash=hashlib.sha1(f"{msg.get('text') or ''}|{(msg.get('edited') or {}).get('ts', '')}|"
+                                      f"{len(msg.get('files') or [])}".encode()).hexdigest()[:16],
             metadata={
                 "channel_id": cid,
                 "channel_name": cfg.get("name"),

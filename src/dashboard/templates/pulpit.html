@@ -41,6 +41,9 @@
 {% endif %}
 
 {# ── KPIs ── #}
+{% if dash and dash.missing_note %}
+<p class="mt-4 -mb-1 flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">{{ icon("clock", "h-3.5 w-3.5 shrink-0") }} {{ dash.missing_note }}</p>
+{% endif %}
 <div class="mt-4 mb-6 grid grid-cols-2 [&>*]:min-w-0 gap-3 lg:grid-cols-4">
   {% if dash %}
     {% set t = dash.total %}

@@ -113,15 +113,23 @@ document.addEventListener('click', async (e) => {
   const scroller = document.getElementById('scroller')
   if (!scroller) return
   const key = 'scroll:' + location.pathname + location.search
-  // Keyboard scrolling (PageDown/Space/arrows) works right away
-  if (document.activeElement === document.body) scroller.focus({ preventScroll: true })
-  // Browsers restore only the root scroll position — keep ours across reloads / Back
+  // Browsers restore only the root scroll position — restore ours on reload / Back, never on a fresh visit
   try {
+    const nav = (performance.getEntriesByType('navigation') || [])[0]
     const y = sessionStorage.getItem(key)
-    if (y !== null) { scroller.scrollTop = Number(y); sessionStorage.removeItem(key) }
+    sessionStorage.removeItem(key)
+    if (y !== null && nav && (nav.type === 'reload' || nav.type === 'back_forward')) scroller.scrollTop = Number(y)
   } catch (e) {}
   window.addEventListener('pagehide', () => {
     try { sessionStorage.setItem(key, String(scroller.scrollTop)) } catch (e) {}
+  })
+  // Keyboard scrolling right after load: the first scroll key goes to the content (Tab order is untouched)
+  const KEYS = { PageDown: 1, PageUp: -1, ' ': 1, ArrowDown: 0.15, ArrowUp: -0.15, End: 99, Home: -99 }
+  document.addEventListener('keydown', (e) => {
+    if (document.activeElement !== document.body || !(e.key in KEYS) || e.altKey || e.ctrlKey || e.metaKey) return
+    e.preventDefault()
+    const step = KEYS[e.key] * (e.shiftKey && e.key === ' ' ? -1 : 1)
+    scroller.scrollBy({ top: Math.abs(step) >= 99 ? step * scroller.scrollHeight : step * scroller.clientHeight * 0.85 })
   })
 })()
 

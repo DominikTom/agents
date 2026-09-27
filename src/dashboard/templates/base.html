@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=4">
+  <link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   {% block head %}{% endblock %}
 </head>
@@ -62,7 +62,7 @@
   </aside>
 
   {# relative: absolutely positioned children (sr-only toggles) must scroll with the content, not the root #}
-  <div id="scroller" tabindex="-1" class="relative flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain outline-none">
+  <div id="scroller" class="relative flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain outline-none">
     {# ── Topbar ── #}
     <header class="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface/80 px-4 backdrop-blur-md sm:px-5">
       <button class="btn-ghost -ml-1 p-2 lg:hidden" onclick="toggleSidebar(true)" aria-label="Menu">{{ icon("menu", "h-5 w-5") }}</button>
@@ -104,7 +104,7 @@
 </nav>
 
 <div id="toasts" class="pointer-events-none fixed bottom-20 right-4 z-[60] flex flex-col items-end gap-2 lg:bottom-6"></div>
-<script src="/static/app.js?v=4"></script>
+<script src="/static/app.js?v={{ asset_v }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

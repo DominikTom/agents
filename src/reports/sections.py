@@ -85,6 +85,8 @@ async def build_sales(ctx: ReportContext) -> dict:
     try:
         d = await ctx.dash()
         out["dzien"] = d["date"]
+        if "sales" in (d.get("missing") or []):
+            out["brak_danych"] = d.get("missing_note")
         out["razem"] = d["total"]
         out["sklepy"] = d["shops"]
         # "last 7 full days" (up to yesterday) is the main trend figure; Mon-to-date only in the weekly review
@@ -280,6 +282,8 @@ def _team_person(u: dict, full: bool = True) -> dict:
         out["praca_poza_os"] = [x.get("title") for x in d.get("not_in_os") or []]
         if not d.get("os_linked"):
             out["uwaga"] = "osoba niepowiązana z OS — nie porównano z zadaniami"
+        elif d.get("os_checked") is False:
+            out["uwaga"] = "MyBed OS był niedostępny — nie porównano z zadaniami"
     return out
 
 
@@ -323,6 +327,8 @@ async def build_team_updates(ctx: ReportContext) -> dict:
     }
     if o["missing_status"] in note:
         out["uwaga"] = note[o["missing_status"]]
+    if o.get("unreadable_channels"):
+        out["kanaly_nieczytane"] = o["unreadable_channels"]
     if o.get("not_analyzed"):
         out["raport_bez_analizy_ai"] = o["not_analyzed"]
     return out

@@ -193,6 +193,9 @@ def kpi_email_html(data: dict | None) -> str:
         f'<div style="margin:4px 0 6px;font-size:13px;line-height:20px;font-weight:600;color:{INK};">Liczby '
         f'<span style="font-weight:400;color:{FAINT};">· {e(first["label"].lower())} {e(first["range"])} vs {e(first["prev_range"])}</span></div>'
     ]
+    if data.get("note"):  # right under the heading, before the (empty) cards — like the Markdown version
+        parts.append(f'<div style="margin:0 0 8px;padding:8px 10px;border-radius:8px;background:#FFFBEB;color:#B45309;'
+                     f'font-size:12px;line-height:17px;">{e(data["note"])}</div>')
     # 2 × 2 headline cards (works on phones and desktop alike)
     cards = headline_cards(data)
     rows_html = []
@@ -202,9 +205,9 @@ def kpi_email_html(data: dict | None) -> str:
             chip = _chip(c["pct"], c["tone"]) if c["has_pct"] else ""
             cells.append(
                 f'<td width="50%" valign="top" style="padding:{"0 4px 8px 0" if len(cells) == 0 else "0 0 8px 4px"};">'
-                f'<div style="background:{CANVAS_CARD};border:1px solid {LINE};border-radius:10px;padding:12px 14px;">'
+                f'<div class="mb-hcard" style="background:{CANVAS_CARD};border:1px solid {LINE};border-radius:10px;padding:12px 14px;">'
                 f'<div style="font-size:12px;line-height:16px;color:{MUTED};">{e(c["label"])}</div>'
-                f'<div style="margin-top:4px;font-size:20px;line-height:26px;font-weight:700;color:{INK};{NUM}">{e(c["value"])}</div>'
+                f'<div class="mb-hval" style="margin-top:4px;font-size:20px;line-height:26px;font-weight:700;color:{INK};{NUM}">{e(c["value"])}</div>'
                 f'<div style="margin-top:4px;">{chip}</div></div></td>'
             )
         if len(cells) == 1:
@@ -216,16 +219,16 @@ def kpi_email_html(data: dict | None) -> str:
     )
     for t in tables(data):
         head = "".join(
-            f'<th align="right" style="padding:6px 0 6px 4px;border-bottom:1px solid {LINE};font-size:11px;line-height:14px;'
+            f'<th class="mb-th" align="right" style="padding:6px 0 6px 3px;border-bottom:1px solid {LINE};font-size:11px;line-height:14px;'
             f'font-weight:600;color:{MUTED};">{"<br>".join(e(x) for x in col.split(chr(10)))}</th>'
             for col in t["columns"]
         )
         body = []
         for r in t["rows"]:
             tds = "".join(
-                f'<td align="right" valign="top" style="padding:7px 0 7px 4px;border-bottom:1px solid {LINE};{NUM}">'
-                f'<div style="font-size:12px;line-height:17px;color:{INK};">{e(_compact(c))}</div>'
-                + (f'<div style="font-size:11px;line-height:15px;font-weight:600;color:{TONES[c["tone"]][0]};">{e(c["pct"])}</div>' if c["pct"] else "")
+                f'<td align="right" valign="top" style="padding:7px 0 7px 3px;border-bottom:1px solid {LINE};{NUM}">'
+                f'<div class="mb-num" style="font-size:12px;line-height:17px;color:{INK};">{e(_compact(c))}</div>'
+                + (f'<div class="mb-pct" style="font-size:11px;line-height:15px;font-weight:600;color:{TONES[c["tone"]][0]};">{e(c["pct"])}</div>' if c["pct"] else "")
                 + "</td>"
                 for c in r["cells"]
             )
@@ -241,9 +244,6 @@ def kpi_email_html(data: dict | None) -> str:
             f'<tr><th align="left" style="padding:6px 6px 6px 0;border-bottom:1px solid {LINE};"></th>{head}</tr>'
             + "".join(body) + "</table>"
         )
-    if data.get("note"):
-        parts.append(f'<div style="margin:10px 0 0;padding:8px 10px;border-radius:8px;background:#FFFBEB;color:#B45309;'
-                     f'font-size:12px;line-height:17px;">{e(data["note"])}</div>')
     parts.append(
         f'<div style="margin:8px 0 0;font-size:11px;line-height:16px;color:{MUTED};">Liczby liczone automatycznie z hurtowni '
         f'dash (sprzedaż, Meta) i GA4 (Google Ads), dane do {e(_d(data["as_of"])) if data.get("as_of") else "wczoraj"}. '

@@ -108,6 +108,22 @@ def _kpi_helpers():
 
 
 templates.env.globals.update(_kpi_helpers())
+
+
+def _asset_version() -> str:
+    """Cache-busting token for app.css / app.js — changes whenever the files change (no manual ?v= bumps)."""
+    import hashlib
+
+    h = hashlib.sha1()
+    for name in ("app.css", "app.js", "icons.svg"):
+        try:
+            h.update((STATIC_DIR / name).read_bytes())
+        except OSError:
+            pass
+    return h.hexdigest()[:10]
+
+
+templates.env.globals["asset_v"] = _asset_version()
 templates.env.globals.update({"now": now, "today": today})
 
 NAV = [
@@ -388,7 +404,8 @@ async def studio_preview(request: Request, key: str):
     except Exception as e:
         return JSONResponse({"error": str(e)[:300]}, status_code=500)
     # the KPI block is rendered from data (outside the AI prose), like on the report page
-    kpi_html = str(templates.env.get_template("_macros.html").module.kpi_block(result["kpi"])) if result.get("kpi") else ""
+    kpi_html = (str(templates.env.get_template("_macros.html").module.kpi_block(result["kpi"], compact=True))
+                if result.get("kpi") else "")
     return {"id": result["id"], "title": result["title"], "lead": result["lead"], "html": result["html"],
             "kpi_html": kpi_html, "errors": result["errors"]}
 
@@ -836,8 +853,7 @@ async def team_suggest(request: Request, day: str = Form(...), person_key: str =
         ref = await client.create_suggestion(title, desc + "\nDodane z panelu MyBed Agents.", f"Raport dnia: {who}", "slack")
     except Exception as e:
         return JSONResponse({"error": str(e)[:300]}, status_code=502)
-    payload["pushed_keys"] = sorted(set(payload.get("pushed_keys") or []) | {key})
-    await db.set_team_update_data(d, person_key, payload)
+    await db.add_team_update_pushed(d, person_key, key, {"key": key, "title": item.get("title"), "ref": ref})
     return {"status": "created", "ref": ref}
 
 
@@ -877,6 +893,8 @@ async def people_page(request: Request):
         e["aliases_by_source"] = by_source
     unmapped = await db.get_unmapped_whatsapp_senders()
     unmapped_slack = await db.get_unmapped_slack_authors()
+    for u in unmapped_slack:  # a name match is only a suggestion — the link is made by your click
+        u["suggested"] = await db.resolve_entity_strict("_none_", u["sender_name"] or "")
     slack_names = {r["user_id"]: r["user_name"] for r in await db.get_slack_user_names()}
     return render(request, "people.html", "people", entities=entity_map, unmapped=unmapped[:60],
                   unmapped_slack=unmapped_slack[:40], slack_names=slack_names)

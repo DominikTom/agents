@@ -1,5 +1,5 @@
 {% macro icon(name, cls="") -%}
-<svg class="icon {{ cls }}" aria-hidden="true"><use href="/static/icons.svg#i-{{ name }}"></use></svg>
+<svg class="icon {{ cls }}" aria-hidden="true"><use href="/static/icons.svg?v={{ asset_v }}#i-{{ name }}"></use></svg>
 {%- endmacro %}
 
 {% macro avatar(name, size="h-7 w-7 text-[11px]") -%}
@@ -57,7 +57,7 @@
 
 
 {# KPI block of a report (meta.kpi) — same structure as the e-mail version in src/reports/kpi.py #}
-{% macro kpi_block(kpi) -%}
+{% macro kpi_block(kpi, compact=False) -%}
 {%- set tone_cls = {"good": "bg-emerald-50 text-emerald-700", "bad": "bg-red-50 text-red-700", "neutral": "bg-surface-2 text-ink-muted"} -%}
 {%- set tone_txt = {"good": "text-emerald-700", "bad": "text-red-700", "neutral": "text-ink-muted"} -%}
 {%- set first = kpi.periods[0] -%}
@@ -66,11 +66,12 @@
     <h3 class="section-title">Liczby</h3>
     <span class="text-xs text-ink-faint">{{ first.label|lower }} {{ first.range }} vs {{ first.prev_range }}</span>
   </div>
-  <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+  {% if kpi.note %}<p class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">{{ kpi.note }}</p>{% endif %}
+  <div class="grid grid-cols-2 gap-2.5 {{ '' if compact else 'sm:grid-cols-4' }}">
     {% for c in kpi_cards(kpi) %}
-    <div class="rounded-xl border border-line bg-canvas/70 px-3.5 py-3">
-      <div class="text-xs font-medium text-ink-muted">{{ c.label }}</div>
-      <div class="mt-1 font-mono text-lg font-semibold tabular-nums text-ink sm:text-xl">{{ c.value }}</div>
+    <div class="min-w-0 rounded-xl border border-line bg-canvas/70 px-3.5 py-3">
+      <div class="truncate text-xs font-medium text-ink-muted">{{ c.label }}</div>
+      <div class="mt-1 truncate font-mono text-lg font-semibold tabular-nums text-ink {{ '' if compact else 'sm:text-xl' }}">{{ c.value }}</div>
       {% if c.has_pct %}<span class="mt-1.5 inline-flex rounded-md px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums {{ tone_cls[c.tone] }}">{{ c.pct }}</span>{% endif %}
     </div>
     {% endfor %}
@@ -108,7 +109,6 @@
     </div>
   </div>
   {% endfor %}
-  {% if kpi.note %}<p class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">{{ kpi.note }}</p>{% endif %}
   <p class="text-[11px] text-ink-faint">Liczone automatycznie z hurtowni dash (sprzedaż, Meta) i GA4 (Google Ads). Zmiana względem poprzedniego okresu o tej samej długości.</p>
 </section>
 {%- endmacro %}

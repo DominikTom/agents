@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from datetime import date, timedelta
 
 from src.ai.client import AIClient
@@ -110,11 +111,14 @@ class TeamUpdates:
         done = skipped = 0
         failed: list[str] = []
         for uid, msgs in groups.items():
-            fp = fingerprint([m["id"] for m in msgs], [m["body"] or "" for m in msgs]) + ("" if snapshot else ":no-os")
+            fp = fingerprint([m["id"] for m in msgs], [m["body"] or "" for m in msgs])
             old = existing.get(uid)
             if not force and old and old.get("fingerprint") == fp:
-                skipped += 1
-                continue
+                # same Slack content: re-analyse only when OS came back for a linked person not compared before
+                checked = (old.get("data") or {}).get("os_checked", True)
+                if snapshot is None or checked or not old.get("os_person_id"):
+                    skipped += 1
+                    continue
             try:
                 await self._analyze(day, uid, msgs, fp, snapshot, (old or {}).get("data") or {})
                 done += 1
@@ -173,9 +177,13 @@ class TeamUpdates:
                 tag = ""
             return f"[{to_local(m['timestamp']).strftime('%H:%M')} #{md.get('channel_name')}{tag}]\n{m['body']}"
 
+        pushed_titles = [p.get("title") for p in previous.get("pushed_items") or [] if p.get("title")]
         if os_checked:
             os_block = (f"=== ZADANIA TEJ OSOBY W MYBED OS ({len(tasks)}) ===\n" + json.dumps(tasks, ensure_ascii=False)
                         + "\n\n=== AKTYWNE PROJEKTY W OS ===\n" + ", ".join(projects[:120]))
+            if pushed_titles:
+                os_block += ("\n\n=== JUŻ WYSŁANE DO OS JAKO PROPOZYCJE (nie proponuj ich ponownie) ===\n"
+                             + "\n".join(f"- {t}" for t in pushed_titles))
         else:
             reason = "osoba nie jest powiązana z OS" if not os_id else "MyBed OS jest chwilowo niedostępny"
             os_block = (f"=== MYBED OS: {reason} — NIE porównuj z OS: os_updates i not_in_os zostaw puste ===")
@@ -197,17 +205,31 @@ class TeamUpdates:
         result["os_updates"] = updates
         if not os_checked:
             result["not_in_os"] = []
+        else:  # drop re-worded repeats of items already sent to OS
+            result["not_in_os"] = [x for x in result.get("not_in_os", [])
+                                   if not any(_similar(x.get("title"), t) for t in pushed_titles)]
         result["os_linked"] = bool(os_id)
         result["os_checked"] = os_checked
         result["os_open_tasks"] = sum(1 for t in tasks if t["status"] != "Done")
-        # suggestions already sent to OS stay marked after a re-analysis (keyed by content, not position)
+        # suggestions already sent to OS stay marked after a re-analysis (keyed by content, not position);
+        # the DB write merges them with anything pushed while this analysis was running
         result["pushed_keys"] = list(previous.get("pushed_keys") or [])
+        result["pushed_items"] = list(previous.get("pushed_items") or [])
         await self.db.upsert_team_update({
             "day": day, "person_key": uid, "person_name": person, "entity_id": entity_id, "os_person_id": os_id,
             "channels": sorted({m["metadata"].get("channel_name") for m in msgs if m["metadata"].get("channel_name")}),
             "event_ids": [m["id"] for m in msgs], "fingerprint": fp, "data": result,
             "first_message_at": (own or msgs)[0]["timestamp"],
         })
+
+
+def _words(text: str | None) -> set[str]:
+    return {w for w in re.findall(r"\w+", (text or "").lower()) if len(w) > 2}
+
+
+def _similar(a: str | None, b: str | None) -> bool:
+    wa, wb = _words(a), _words(b)
+    return bool(wa and wb) and len(wa & wb) / min(len(wa), len(wb)) >= 0.7
 
 
 def suggestion_key(kind: str, item: dict) -> str:
@@ -248,19 +270,22 @@ async def daily_channel_ids(db: Database, members_only: bool = False) -> list[st
 
 
 MISSING_CUTOFF_HOUR = 20  # reports come in the afternoon; "missing" is decided only after the day is over
+SYNC_FRESH = timedelta(minutes=30)
 
 
 async def team_overview(db: Database, day: date) -> dict:
     """Reports of one day + who usually reports but didn't (missing) — for the panel and the reports.
 
     "Reported" comes from the Slack messages themselves (an AI analysis that failed or has not run yet
-    must not turn into a false alarm). "Missing" is only computed when it can be trusted: the day is
-    over, the bot still reads the channels and the Slack sync is healthy."""
+    must not turn into a false alarm). "Missing" is computed only over channels the bot can read, only
+    after the day is over, and only when a successful Slack sync covers the end of that day."""
     from src.common.timeutil import now
 
     updates = await db.get_team_updates(day, day)
+    channels = ((await db.get_setting("slack", {})) or {}).get("channels", {}) or {}
     all_daily = await daily_channel_ids(db)
     daily_ids = await daily_channel_ids(db, members_only=True)
+    unreadable = sorted(channels[c].get("name") or c for c in all_daily if c not in daily_ids)
     start, end = day_range(day)
     msgs = await db.get_slack_messages(start, end, daily_ids) if daily_ids else []
     reported = {m["metadata"].get("user_id") for m in msgs if not m["metadata"].get("is_reply")}
@@ -271,12 +296,13 @@ async def team_overview(db: Database, day: date) -> dict:
         missing_status = "weekend"
     elif day > current.date() or (day == current.date() and current.hour < MISSING_CUTOFF_HOUR):
         missing_status = "day_in_progress"
+    elif not daily_ids:
+        missing_status = "channels_unreadable"
     else:
-        run = (await db.get_last_run_any(["slack_sync"])).get("slack_sync")
-        healthy = run and run.get("status") == "success" and to_local(run["ran_at"]) >= to_local(end)
-        if not daily_ids or len(daily_ids) < len(all_daily):
-            missing_status = "channels_unreadable"
-        elif not healthy and day >= current.date() - timedelta(days=1):
+        last_ok = await db.last_success_at("slack_sync")
+        # today (after the cutoff): the sync must be fresh; a past day: a successful sync after it ended
+        need = current - SYNC_FRESH if day == current.date() else end
+        if not last_ok or last_ok < need:
             missing_status = "sync_unhealthy"
         else:
             reporters = await db.get_slack_reporters(day_range(day - timedelta(days=21))[0], daily_ids, until=end)
@@ -289,6 +315,7 @@ async def team_overview(db: Database, day: date) -> dict:
         "updates": updates,
         "missing": sorted(missing, key=lambda m: m["name"] or ""),
         "missing_status": missing_status,
+        "unreadable_channels": unreadable,
         "not_analyzed": sorted({m["metadata"].get("user_name") for m in msgs
                                 if not m["metadata"].get("is_reply") and m["metadata"].get("user_id") not in analyzed}),
         "no_plan": [u["person_name"] for u in updates if (u["data"] or {}).get("plan_quality") == "missing"],

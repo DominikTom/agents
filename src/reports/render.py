@@ -10,20 +10,42 @@ import markdown as md
 _ALLOWED_HREF = re.compile(r"^(https?:|mailto:)", re.I)
 
 
+def _bind_amounts(text: str) -> str:
+    """Non-breaking spaces inside amounts: '1 301 384 zł' never wraps as '1 301' / '384 zł'."""
+    text = re.sub(r"(?<=\d) (?=\d{3}(?!\d))", "\u00a0", text)
+    return re.sub(r"(?<=[\d,]) (?=(?:zł|EUR|PLN|€|%|mln|tys\.))", "\u00a0", text)
+
+
+_TABLE_CELL_STYLE = re.compile(r'\sstyle="text-align: (?:left|right|center);"')
+
+
+def _sanitize(out: str) -> str:
+    """Allow-list pass over the generated HTML: no images, no attributes except safe links and table alignment
+    (fenced code accepts `{ .class #id }` even without attr_list)."""
+    out = re.sub(r"<img\b[^>]*>", "", out)
+
+    def tag(m: re.Match) -> str:
+        name, attrs = m.group(1).lower(), m.group(2) or ""
+        if name == "a":
+            href = re.search(r'href="([^"]*)"', attrs)
+            url = html.unescape(href.group(1)) if href else ""
+            if not _ALLOWED_HREF.match(url):
+                return "<a>"
+            return f'<a href="{html.escape(url)}" target="_blank" rel="noopener">'
+        if name in ("td", "th"):
+            align = _TABLE_CELL_STYLE.search(attrs)
+            return f"<{name}{align.group(0) if align else ''}>"
+        return f"<{name}>"
+
+    return re.sub(r"<([a-zA-Z][a-zA-Z0-9]*)(\s[^>]*)?>", tag, out)
+
+
 def to_html(text: str) -> str:
     """Render report markdown safely: raw HTML from the model is escaped, only http(s)/mailto links survive."""
-    safe = html.escape(text or "", quote=False)
+    safe = _bind_amounts(html.escape(text or "", quote=False))
     # No "extra": it includes attr_list / md_in_html, which let text like `{: onclick=… }` add attributes
     out = md.markdown(safe, extensions=["tables", "fenced_code", "sane_lists", "nl2br"], output_format="html")
-
-    def fix_link(m: re.Match) -> str:
-        href = html.unescape(m.group(1))
-        if not _ALLOWED_HREF.match(href):
-            return "<a>"
-        return f'<a href="{html.escape(href)}" target="_blank" rel="noopener">'
-
-    out = re.sub(r'<a href="([^"]*)"[^>]*>', fix_link, out)
-    return _mark_numeric_columns(out)
+    return _mark_numeric_columns(_sanitize(out))
 
 
 def _mark_numeric_columns(content: str) -> str:
@@ -124,6 +146,8 @@ def _numeric_columns(table: str) -> set[int]:
 def _style_table(table: str) -> str:
     """Right-align (tabular figures) columns that hold numbers; header cells follow their column."""
     numeric_cols = _numeric_columns(table)
+    first_row = re.search(r"<tr>(.*?)</tr>", table, flags=re.S)
+    ncols = len(re.findall(r"<t[dh][\s>]", first_row.group(1))) if first_row else 0
 
     def fix_row(m: re.Match) -> str:
         idx = -1
@@ -138,10 +162,12 @@ def _style_table(table: str) -> str:
                 style = (f"text-align:{align};padding:6px 8px;border-bottom:1px solid {LINE};color:{MUTED};"
                          "font-size:12px;font-weight:600;")
             else:
-                short = len(re.sub(r"<[^>]+>", "", inner).strip()) <= 16  # long cells may wrap on phones
+                plain = re.sub(r"<[^>]+>", "", inner).strip()
+                # short plain amounts never wrap; long cells, cells with a note and wide tables may (phones)
+                short = len(plain) <= 16 and "(" not in plain and ncols <= 4
                 style = (f"text-align:{align};padding:6px 8px;border-bottom:1px solid {LINE};color:{SOFT};"
                          + (NUM + ("white-space:nowrap;" if short else "") if num else ""))
-            return f'<{tag} style="{style}">{inner}</{tag}>'
+            return f'<{tag} class="mb-td" style="{style}">{inner}</{tag}>'
 
         return "<tr>" + re.sub(r"<(td|th)(?: [^>]*)?>(.*?)</\1>", cell, m.group(1), flags=re.S) + "</tr>"
 
@@ -185,13 +211,22 @@ def email_html(*, label: str, title: str, body_html: str, url: str | None, foote
 <style>
   @media only screen and (max-width: 480px) {{
     .mb-outer {{ padding: 12px 4px !important; }}
-    .mb-card {{ padding: 20px 14px 18px !important; border-radius: 10px !important; }}
+    .mb-card {{ padding: 20px 12px 18px !important; border-radius: 10px !important; }}
+    .mb-num {{ font-size: 11px !important; }}
+  }}
+  @media only screen and (max-width: 340px) {{
+    .mb-card {{ padding: 18px 8px 16px !important; }}
+    .mb-num, .mb-pct {{ font-size: 10px !important; }}
+    .mb-th {{ font-size: 10px !important; }}
+    .mb-hcard {{ padding: 10px !important; }}
+    .mb-td {{ padding: 5px 3px !important; font-size: 12px !important; }}
+    .mb-hval {{ font-size: 16px !important; line-height: 22px !important; }}
   }}
 </style></head>
 <body style="margin:0;padding:0;background:{CANVAS};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%;">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">{preheader}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{CANVAS};">
-<tr><td class="mb-outer" align="center" style="padding:24px 12px;">
+<tr><td class="mb-outer" align="center" style="padding:20px 6px;">
   <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;">
     <tr><td style="padding:0 4px 14px;">
       <table role="presentation" cellpadding="0" cellspacing="0"><tr>
@@ -200,7 +235,7 @@ def email_html(*, label: str, title: str, body_html: str, url: str | None, foote
         <td style="padding-left:6px;font-size:12px;color:{FAINT};">Agents</td>
       </tr></table>
     </td></tr>
-    <tr><td class="mb-card" style="background:#FFFFFF;border:1px solid {LINE};border-radius:12px;padding:26px 24px 24px;">
+    <tr><td class="mb-card" style="background:#FFFFFF;border:1px solid {LINE};border-radius:12px;padding:24px 16px 22px;">
       <div style="font-size:12px;font-weight:600;color:{PRIMARY};margin-bottom:6px;">{html.escape(label)}</div>
       <div style="font-size:21px;line-height:28px;font-weight:700;color:{INK};margin-bottom:16px;">{html.escape(title)}</div>
       {lead_html}
