@@ -16,7 +16,9 @@ import re
 from datetime import date, timedelta
 
 from src.ai.client import AIClient
-from src.common.timeutil import day_range, fmt_date_pl, to_local, today
+from src.common.timeutil import day_range, fmt_date_pl, previous_workday, to_local, today
+from src.processing.os_daily import (HISTORY_DAYS, DailyData, escalations, get_cutover, load_daily, missing_for,
+                                     os_only, report_view)
 from src.storage.database import Database
 
 logger = logging.getLogger(__name__)
@@ -85,10 +87,8 @@ def fingerprint(event_ids: list[int], bodies: list[str]) -> str:
 
 
 def last_workday(ref: date) -> date:
-    d = ref - timedelta(days=1)
-    while d.weekday() >= 5:
-        d -= timedelta(days=1)
-    return d
+    """Previous working day (weekends and Polish public holidays skipped)."""
+    return previous_workday(ref)
 
 
 class TeamUpdates:
@@ -101,6 +101,8 @@ class TeamUpdates:
 
     async def run(self, day: date | None = None, force: bool = False) -> dict:
         day = day or today()
+        if os_only(day, await get_cutover(self.db)):
+            return {"skipped": "raporty dnia są w MyBed OS (Daily Update) — Slack nie jest analizowany"}
         channel_ids = await self.daily_channel_ids()
         if not channel_ids:
             return {"skipped": "brak kanałów z raportami dziennymi (Źródła → Slack)"}
@@ -108,9 +110,17 @@ class TeamUpdates:
         groups = group_reports(await self.db.get_slack_messages(start, end, channel_ids))
         existing = {u["person_key"]: u for u in await self.db.get_team_updates(day, day)}
         snapshot = await self._os_snapshot()
-        done = skipped = 0
+        # people who already wrote their report in MyBed OS for this day: that report wins, no AI call for Slack
+        in_os: set[str] = set()
+        if groups:
+            os_day = await load_daily(day, day, snapshot=snapshot)
+            in_os = set(os_day.reported(day)) if os_day.ok else set()
+        done = skipped = in_os_count = 0
         failed: list[str] = []
         for uid, msgs in groups.items():
+            if in_os and await self._os_id(uid, msgs) in in_os:
+                in_os_count += 1
+                continue
             # names too: an author name repaired after a users.info failure refreshes the card
             fp = fingerprint([m["id"] for m in msgs],
                              [f"{m['metadata'].get('user_name')}:{m['body'] or ''}" for m in msgs])
@@ -128,9 +138,17 @@ class TeamUpdates:
                 logger.warning(f"Team update {uid} {day}: {e}")
                 failed.append(msgs[0]["metadata"].get("user_name") or uid)
         out = {"day": day.isoformat(), "people": len(groups), "analyzed": done, "unchanged": skipped}
+        if in_os_count:
+            out["reported_in_os"] = in_os_count
         if failed:
             out["error"] = f"analiza nieudana dla {len(failed)} os.: {', '.join(failed)}"
         return out
+
+    async def _os_id(self, uid: str, msgs: list[dict]) -> str | None:
+        entity_id = next((m["sender_entity_id"] for m in msgs
+                          if m["metadata"].get("user_id") == uid and m.get("sender_entity_id")), None)
+        entity = await self.db.get_entity(entity_id) if entity_id else None
+        return ((entity or {}).get("metadata") or {}).get("os_id")
 
     async def _os_snapshot(self):
         from src.connectors.os_mybed import OSClient
@@ -292,17 +310,70 @@ MISSING_CUTOFF_HOUR = 20  # reports come in the afternoon; "missing" is decided 
 SYNC_FRESH = timedelta(minutes=30)
 
 
-async def team_overview(db: Database, day: date) -> dict:
-    """Reports of one day + who usually reports but didn't (missing) — for the panel and the reports.
+async def team_overview(db: Database, day: date, os_data: DailyData | None = None) -> dict:
+    """Reports of one day + who did not report (missing) — for the panel, the reports and MCP.
 
-    "Reported" comes from the Slack messages themselves (an AI analysis that failed or has not run yet
-    must not turn into a false alarm). "Missing" is computed only over channels the bot can read, only
-    after the day is over, and only when a successful Slack sync covers the end of that day."""
+    Two sources. MyBed OS (Daily Update) is the target: its reports are always used, and from the switch day
+    set in the panel (daily_source.cutover) it is the only one — "missing" then follows the OS rule
+    (participants, Polish workdays, decided at 10:00 of the next workday). Before that day Slack still counts
+    for people who have no OS report for that day.
+
+    Slack "reported" comes from the messages themselves (an AI analysis that failed or has not run yet must not
+    turn into a false alarm). Slack "missing" is computed only over channels the bot can read, only after the
+    day is over, and only when a successful Slack sync covers the end of that day."""
+    cutover = await get_cutover(db)
+    if os_data is None:
+        os_data = await load_daily(day - timedelta(days=HISTORY_DAYS), day)
+    os_views = [report_view(r, os_data) for r in os_data.for_day(day) if r.get("status") in ("submitted", "off")]
+    os_reports = sorted((v for v in os_views if v["status"] == "submitted"), key=lambda v: v["person_name"])
+    os_authors = {v["os_person_id"] for v in os_views}
+    common = {
+        "day": day,
+        "cutover": cutover,
+        "os_error": os_data.error,
+        "absent": sorted(v["person_name"] for v in os_views if v["status"] == "off"),  # never the reason (§6.2)
+        # in the transition period nobody is "missing for days" — they may still be reporting on Slack
+        "escalations": escalations(day, os_data, os_from=cutover or date.max),
+    }
+    if os_only(day, cutover):
+        status, missing, not_yet = missing_for(day, os_data)
+        return {
+            **common,
+            "mode": "os",
+            "updates": os_reports,
+            "missing": missing,
+            "not_yet": not_yet,
+            "missing_status": status,
+            "unreadable_channels": [],
+            "not_analyzed": [],
+            "no_plan": [u["person_name"] for u in os_reports if u["data"].get("plan_quality") == "missing"],
+            "channels_configured": True,
+        }
+    slack = await _slack_overview(db, day)
+    slack_updates = [u for u in slack["updates"] if not u.get("os_person_id") or u["os_person_id"] not in os_authors]
+    missing = [m for m in slack["missing"] if not m.get("os_id") or m["os_id"] not in os_authors]
+    updates = os_reports + slack_updates
+    return {
+        **common,
+        "mode": "hybrid",
+        "updates": updates,
+        "missing": missing,
+        "not_yet": [],
+        "missing_status": slack["missing_status"],
+        "unreadable_channels": slack["unreadable_channels"],
+        "not_analyzed": slack["not_analyzed"],
+        "no_plan": [u["person_name"] for u in updates if (u["data"] or {}).get("plan_quality") == "missing"],
+        "channels_configured": slack["channels_configured"],
+    }
+
+
+async def _slack_overview(db: Database, day: date) -> dict:
     from src.common.timeutil import now
 
     updates = await db.get_team_updates(day, day)
     for u in updates:
         normalize_pushed(u["data"] or {})
+        u["source"] = "slack"
     channels = ((await db.get_setting("slack", {})) or {}).get("channels", {}) or {}
     all_daily = await daily_channel_ids(db)
     daily_ids = await daily_channel_ids(db, members_only=True)
@@ -329,16 +400,16 @@ async def team_overview(db: Database, day: date) -> dict:
             reporters = await db.get_slack_reporters(day_range(day - timedelta(days=21))[0], daily_ids, until=end)
             for r in reporters:
                 if r["user_id"] not in reported and int(r["days"] or 0) >= 3:
-                    missing.append({"name": r["user_name"], "report_days_21d": int(r["days"]), "last_at": r["last_at"]})
+                    entity = await db.get_entity(r["entity_id"]) if r.get("entity_id") else None
+                    missing.append({"name": r["user_name"], "report_days_21d": int(r["days"]), "last_at": r["last_at"],
+                                    "os_id": ((entity or {}).get("metadata") or {}).get("os_id")})
     analyzed = {u["person_key"] for u in updates}
     return {
-        "day": day,
         "updates": updates,
         "missing": sorted(missing, key=lambda m: m["name"] or ""),
         "missing_status": missing_status,
         "unreadable_channels": unreadable,
         "not_analyzed": sorted({m["metadata"].get("user_name") for m in msgs
                                 if not m["metadata"].get("is_reply") and m["metadata"].get("user_id") not in analyzed}),
-        "no_plan": [u["person_name"] for u in updates if (u["data"] or {}).get("plan_quality") == "missing"],
         "channels_configured": bool(all_daily),
     }

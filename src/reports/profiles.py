@@ -81,8 +81,8 @@ SECTION_CATALOG: dict[str, dict] = {
     },
     "team_updates": {
         "label": "Raporty dnia zespołu",
-        "description": "Dzienne raporty ludzi ze Slacka: co dowieźli, plan, blokery, kto nie wysłał raportu i rozjazd z OS.",
-        "instruction": "Najpierw alarmy: kto nie wysłał raportu, kto nie ma planu na kolejny dzień/tydzień, realne blokady (szczególnie zależne od Dominika). Potem po jednej linii na osobę: co dowiozła i na czym się skupia. Na końcu rozjazd z OS: zadania, które wg raportu są zrobione/w toku, a w OS mają inny status, i istotna praca, której nie ma w OS. Nie przepisuj całych raportów.",
+        "description": "Dzienne raporty ludzi z MyBed OS (Daily Update; w okresie przejściowym też ze Slacka): co dowieźli, plan, blokery, eskalacje, kto nie wysłał raportu.",
+        "instruction": "Najpierw alarmy: eskalacje (prośby bez reakcji, zadania, które długo czekają, seria dni bez raportu, stare blokery), kto nie wysłał raportu, kto nie ma planu na kolejny dzień, realne blokady (szczególnie zależne od Dominika). Potem po jednej linii na osobę: co dowiozła i na czym się skupia. Na końcu: co zespół sam zmienił w OS po raporcie (zatwierdzone zmiany) oraz — dla raportów ze Slacka — rozjazd z OS i praca, której nie ma w OS. Nieobecność podawaj bez powodu. Nie przepisuj całych raportów i nie cytuj ich.",
         "data": True,
         "auto_enable": True,
     },

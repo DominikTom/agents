@@ -13,7 +13,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
-from src.common.timeutil import day_range, day_start, hours_since, to_local, today, week_start
+from src.common.timeutil import day_range, day_start, hours_since, to_local, week_start
 from src.connectors.dash import DashClient
 from src.connectors.os_mybed import OSClient, OSSnapshot
 from src.storage.database import Database, _j
@@ -262,9 +262,12 @@ async def build_team(ctx: ReportContext) -> dict:
 
 def _team_person(u: dict, full: bool = True) -> dict:
     d = u.get("data") or {}
+    if u.get("source") == "os":
+        return _os_person(u, d, full)
     out = {
         "osoba": u.get("person_name"),
         "dzien": u["day"].isoformat() if hasattr(u["day"], "isoformat") else u["day"],
+        "zrodlo": "Slack",
         "podsumowanie": d.get("summary"),
         "blokery": d.get("blockers") or [],
         "plan": d.get("next") or [],
@@ -287,23 +290,65 @@ def _team_person(u: dict, full: bool = True) -> dict:
     return out
 
 
+def _os_person(u: dict, d: dict, full: bool) -> dict:
+    """A report written in MyBed OS. The OS already analysed it and the author decided on the suggestions —
+    the report only states what happened (no absence reasons, manager replies or quotes)."""
+    out = {
+        "osoba": u.get("person_name"),
+        "dzien": u["day"].isoformat() if hasattr(u["day"], "isoformat") else u["day"],
+        "zrodlo": "MyBed OS",
+        "podsumowanie": d.get("summary"),
+        "blokery": d.get("blockers") or [],
+        "plan": d.get("next") or [],
+        "plan_jakosc": d.get("plan_quality"),
+    }
+    if full:
+        out["zrobione"] = d.get("done") or []
+        out["w_toku"] = d.get("in_progress") or []
+        out["nie_ruszone"] = d.get("not_touched") or []
+        out["poza_os"] = (d.get("outside_os_items") or []) + (d.get("outside_os") or [])
+        out["zmiany_w_os_zatwierdzone_przez_autora"] = d.get("applied") or []
+        if d.get("pending_suggestions"):
+            out["propozycje_ai_czekajace_na_autora"] = d["pending_suggestions"]
+        if d.get("analysis_status") != "done":
+            out["uwaga"] = "analiza AI w OS jeszcze się nie zakończyła"
+        if d.get("edited_after_submit"):
+            out["poprawiony_po_wyslaniu"] = True
+    return {k: v for k, v in out.items() if v not in (None, [], "")}
+
+
+_MISSING_NOTE = {
+    "day_in_progress": "dzień jeszcze trwa — kto nie wysłał raportu, wiadomo dopiero później",
+    "channels_unreadable": "bot nie ma dostępu do części kanałów — brak raportu nie do sprawdzenia",
+    "sync_unhealthy": "synchronizacja Slacka nie działa — brak raportu nie do sprawdzenia",
+    "os_unavailable": "MyBed OS niedostępny — brak raportu nie do sprawdzenia",
+}
+
+
 async def build_team_updates(ctx: ReportContext) -> dict:
+    from src.processing.os_daily import HISTORY_DAYS, get_cutover, load_daily, os_only
     from src.processing.team_updates import daily_channel_ids, last_workday, team_overview
 
-    if not await daily_channel_ids(ctx.db):
-        raise RuntimeError("Slack: nie wybrano kanałów z raportami dziennymi (panel → Źródła → Slack)")
     if ctx.kind == "weekly":
         days = [week_start(ctx.today) + timedelta(days=i) for i in range((ctx.today - week_start(ctx.today)).days + 1)]
     elif ctx.kind == "wrap":
         days = [ctx.today if ctx.today.weekday() < 5 else last_workday(ctx.today)]
     else:
         days = [last_workday(ctx.today)]
-    per_day = [await team_overview(ctx.db, d) for d in days if d.weekday() < 5]
-    note = {
-        "day_in_progress": "dzień jeszcze trwa — kto nie wysłał raportu, wiadomo dopiero wieczorem",
-        "channels_unreadable": "bot nie ma dostępu do części kanałów — brak raportu nie do sprawdzenia",
-        "sync_unhealthy": "synchronizacja Slacka nie działa — brak raportu nie do sprawdzenia",
-    }
+    days = [d for d in days if d.weekday() < 5] or days[-1:]
+    cutover = await get_cutover(ctx.db)
+    if not os_only(days[-1], cutover) and not await daily_channel_ids(ctx.db) and not OSClient().configured:
+        raise RuntimeError("Brak źródła raportów dnia: MyBed OS nie jest skonfigurowany, a na Slacku nie wybrano "
+                           "kanałów (panel → Źródła → Slack)")
+    try:
+        snapshot = await ctx.os()
+    except Exception:
+        snapshot = None
+    os_data = await load_daily(days[0] - timedelta(days=HISTORY_DAYS), days[-1], snapshot=snapshot)
+    per_day = [await team_overview(ctx.db, d, os_data=os_data) for d in days]
+    source = ("MyBed OS (Daily Update)" if all(o["mode"] == "os" for o in per_day)
+              else "MyBed OS (Daily Update) + Slack dla osób bez raportu w OS — okres przejściowy")
+    last = per_day[-1]
     if ctx.kind == "weekly":
         people: dict[str, dict] = {}
         for o in per_day:
@@ -311,22 +356,35 @@ async def build_team_updates(ctx: ReportContext) -> dict:
                 p = people.setdefault(u["person_name"], {"osoba": u["person_name"], "dni_z_raportem": 0, "dni": []})
                 p["dni_z_raportem"] += 1
                 p["dni"].append(_team_person(u, full=False))
-        return {
-            "dni_robocze": [d.isoformat() for d in days if d.weekday() < 5],
+        out = {
+            "zrodlo": source,
+            "dni_robocze": [d.isoformat() for d in days],
             "osoby": list(people.values()),
             "brak_raportu": {o["day"].isoformat(): [m["name"] for m in o["missing"]] for o in per_day if o["missing"]},
-            "uwagi": {o["day"].isoformat(): note[o["missing_status"]] for o in per_day if o["missing_status"] in note},
+            "nieobecni": {o["day"].isoformat(): o["absent"] for o in per_day if o["absent"]},
+            "uwagi": {o["day"].isoformat(): _MISSING_NOTE[o["missing_status"]]
+                      for o in per_day if o["missing_status"] in _MISSING_NOTE},
+            "eskalacje": [e["text"] for e in last["escalations"]],
         }
-    o = per_day[0] if per_day else {"day": days[0], "updates": [], "missing": [], "no_plan": [],
-                                    "missing_status": "weekend", "not_analyzed": []}
+        return {k: v for k, v in out.items() if v or k in ("osoby", "brak_raportu")}
+    o = last
     out = {
+        "zrodlo": source,
         "dzien": o["day"].isoformat(),
         "raporty": [_team_person(u) for u in o["updates"]],
         "brak_raportu": [m["name"] for m in o["missing"]],
         "brak_planu": o["no_plan"],
     }
-    if o["missing_status"] in note:
-        out["uwaga"] = note[o["missing_status"]]
+    if o["absent"]:
+        out["nieobecni"] = o["absent"]
+    if o["not_yet"]:
+        out["jeszcze_bez_raportu"] = [m["name"] for m in o["not_yet"]]
+    if o["escalations"]:
+        out["eskalacje"] = [e["text"] for e in o["escalations"]]
+    if o["missing_status"] in _MISSING_NOTE:
+        out["uwaga"] = _MISSING_NOTE[o["missing_status"]]
+    if o["os_error"]:
+        out["blad_os"] = o["os_error"]
     if o.get("unreadable_channels"):
         out["kanaly_nieczytane"] = o["unreadable_channels"]
     if o.get("not_analyzed"):

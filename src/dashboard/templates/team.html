@@ -6,24 +6,29 @@
 <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
   <div>
     <h2 class="page-title">Raporty dnia zespołu</h2>
-    <p class="page-subtitle">Dzienne raporty ze Slacka przeczytane przez AI i porównane z zadaniami w MyBed OS. Nic nie zmienia się w OS bez Twojego kliknięcia.</p>
+    <p class="page-subtitle">{% if o.mode == "os" %}Raporty z MyBed OS (Daily Update) — analizę i zmiany w zadaniach zatwierdza w OS sam autor, tu widzisz wynik, braki i eskalacje.{% else %}Raporty z MyBed OS (Daily Update), a dla osób bez raportu w OS — ze Slacka (okres przejściowy). Nic nie zmienia się w OS bez Twojego kliknięcia.{% endif %}</p>
   </div>
   <div class="flex flex-wrap items-center gap-1.5">
     <a href="/team?day={{ prev_day.isoformat() }}" class="btn-secondary !px-2 !py-1.5" aria-label="Poprzedni dzień">{{ icon("chevron-left") }}</a>
     <span class="min-w-[9rem] text-center text-sm font-semibold text-ink">{{ day|datepl }}</span>
     {% if next_day %}<a href="/team?day={{ next_day.isoformat() }}" class="btn-secondary !px-2 !py-1.5" aria-label="Następny dzień">{{ icon("chevron-right") }}</a>{% else %}<span class="btn-secondary pointer-events-none !px-2 !py-1.5 opacity-40">{{ icon("chevron-right") }}</span>{% endif %}
-    <button class="btn-primary !py-1.5" data-run="/api/team/analyze" data-params="day={{ day.isoformat() }}" data-busy="Analizuję…" data-msg="Analizuję raporty — odśwież za chwilę" data-reload="20000">{{ icon("sparkles") }} Przeanalizuj</button>
+    {% if o.mode != "os" %}<button class="btn-primary !py-1.5" data-run="/api/team/analyze" data-params="day={{ day.isoformat() }}" data-busy="Analizuję…" data-msg="Analizuję raporty — odśwież za chwilę" data-reload="20000">{{ icon("sparkles") }} Przeanalizuj Slacka</button>{% endif %}
   </div>
 </div>
 
-{% if not o.channels_configured %}
+{% if o.os_error %}
+<div class="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{{ icon("circle-alert") }} {{ o.os_error }}</div>
+{% endif %}
+{% if o.mode != "os" and not o.channels_configured and not o.updates %}
 <div class="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
   Nie ma jeszcze kanałów z raportami dnia. Wejdź w <a class="font-semibold underline" href="/sources/slack">Źródła → Slack</a>, zaproś bota na kanały (#dev-daily-updates, #kamila-daily-update…) i zaznacz „Raporty dnia”.
 </div>
 {% endif %}
 
 {# ── Alerts ── #}
-{% set why = {"day_in_progress": "Dzień jeszcze trwa — „brak raportu” sprawdzimy po 20:00.",
+{% set why = {"day_in_progress": ("Dzień jeszcze trwa — „brak raportu” liczymy od 10:00 następnego dnia roboczego (można oddać raport spóźniony)." if o.mode == "os" else "Dzień jeszcze trwa — „brak raportu” sprawdzimy po 20:00."),
+              "os_unavailable": "MyBed OS jest niedostępny — nie da się sprawdzić, kto nie wysłał raportu.",
+              "not_required": "W Daily Update nie ma listy osób zobowiązanych do raportu albo przypomnienia są wyłączone — braków nie liczymy.",
               "channels_unreadable": "Bot nie ma dostępu do części kanałów z raportami — nie da się sprawdzić, kto nie wysłał raportu. Zajrzyj do Źródła → Slack.",
               "sync_unhealthy": "Synchronizacja Slacka nie działa albo jest opóźniona — „brak raportu” nie jest teraz wiarygodny."} %}
 {% if o.missing_status in why %}
@@ -35,13 +40,25 @@
 {% if o.not_analyzed %}
 <p class="mb-3 flex items-center gap-2 rounded-xl bg-surface-2 px-3 py-2 text-xs text-ink-muted">{{ icon("clock", "h-3.5 w-3.5 shrink-0") }} Raport jest na Slacku, ale AI go jeszcze nie przeanalizowało: {{ o.not_analyzed|join(", ") }}. Kliknij „Przeanalizuj”.</p>
 {% endif %}
+{% if o.escalations %}
+<section class="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
+  <div class="flex items-center gap-2 text-sm font-semibold text-red-700">{{ icon("triangle-alert", "h-4 w-4") }} Wymaga interwencji ({{ o.escalations|length }})</div>
+  <ul class="mt-2 space-y-1 text-[13px] text-red-800">{% for e in o.escalations %}<li class="flex gap-2"><span class="text-red-400">•</span><span>{{ e.text }}</span></li>{% endfor %}</ul>
+</section>
+{% endif %}
+{% if o.not_yet or o.absent %}
+<div class="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-ink-muted">
+  {% if o.not_yet %}<span class="flex flex-wrap items-center gap-1.5">{{ icon("clock", "h-3.5 w-3.5") }} Jeszcze bez raportu: {% for m in o.not_yet %}<span class="chip border-line text-ink-soft">{{ m.name }}{% if m.state == "szkic" %} · szkic{% endif %}</span>{% endfor %}</span>{% endif %}
+  {% if o.absent %}<span class="flex flex-wrap items-center gap-1.5">{{ icon("calendar", "h-3.5 w-3.5") }} Nieobecni: {% for n in o.absent %}<span class="chip border-line text-ink-soft">{{ n }}</span>{% endfor %}</span>{% endif %}
+</div>
+{% endif %}
 {% if o.missing or o.no_plan %}
 <div class="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
   {% if o.missing %}
   <section class="rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
     <div class="flex items-center gap-2 text-sm font-semibold text-red-700">{{ icon("triangle-alert", "h-4 w-4") }} Brak raportu ({{ o.missing|length }})</div>
-    <p class="mt-1 text-xs text-red-700">Te osoby zwykle raportują, a tego dnia nie wysłały raportu:</p>
-    <div class="mt-2 flex flex-wrap gap-1.5">{% for m in o.missing %}<span class="chip border-red-200 bg-surface text-red-700">{{ m.name }}</span>{% endfor %}</div>
+    <p class="mt-1 text-xs text-red-700">{% if o.mode == "os" %}Osoby z listy Daily Update bez raportu za ten dzień:{% else %}Te osoby zwykle raportują, a tego dnia nie wysłały raportu:{% endif %}</p>
+    <div class="mt-2 flex flex-wrap gap-1.5">{% for m in o.missing %}<span class="chip border-red-200 bg-surface text-red-700">{{ m.name }}{% if m.state == "szkic" %} · tylko szkic{% endif %}</span>{% endfor %}</div>
   </section>
   {% endif %}
   {% if o.no_plan %}
@@ -67,16 +84,22 @@
           {% if d.plan_quality == "missing" %}<span class="badge bg-amber-50 text-amber-700">brak planu</span>
           {% elif d.plan_quality == "vague" %}<span class="badge bg-surface-2 text-ink-muted">plan ogólny</span>{% endif %}
           {% if d.blockers %}<span class="badge bg-red-50 text-red-700">blokada</span>{% endif %}
-          {% if not d.os_linked %}<span class="badge bg-surface-2 text-ink-muted" title="Dopasuj osobę w zakładce Ludzie">bez powiązania z OS</span>
+          {% if u.source == "os" %}<span class="badge bg-primary-soft text-primary-ink">MyBed OS</span>{% if d.edited_after_submit %}<span class="badge bg-surface-2 text-ink-muted">poprawiony</span>{% endif %}
+          {% elif not d.os_linked %}<span class="badge bg-surface-2 text-ink-muted" title="Dopasuj osobę w zakładce Ludzie">bez powiązania z OS</span>
           {% elif d.os_checked is sameas false %}<span class="badge bg-surface-2 text-ink-muted" title="MyBed OS był niedostępny podczas analizy">OS nie sprawdzony</span>{% endif %}
         </div>
-        <div class="mt-0.5 text-xs text-ink-muted">{% for c in u.channels %}#{{ c }}{% if not loop.last %}, {% endif %}{% endfor %}{% if u.first_message_at %} · {{ u.first_message_at|hm }}{% endif %}{% if d.hours %} · {{ d.hours }}{% endif %}</div>
+        <div class="mt-0.5 text-xs text-ink-muted">{% if u.source == "os" %}Daily Update · <a class="underline" href="{{ u.link }}" target="_blank" rel="noopener">otwórz w OS</a>{% else %}Slack · {% endif %}{% for c in u.channels %}#{{ c }}{% if not loop.last %}, {% endif %}{% endfor %}{% if u.first_message_at %} · {{ u.first_message_at|hm }}{% endif %}{% if d.hours %} · {{ d.hours }}{% endif %}</div>
       </div>
     </header>
     <div class="flex-1 space-y-3 px-4 py-3 text-sm">
       {% if d.summary %}<p class="text-ink-soft">{{ d.summary }}</p>{% endif %}
       {% if d.attention %}<p class="flex gap-2 rounded-lg bg-primary-soft px-3 py-2 text-[13px] text-primary-ink"><span class="mt-0.5 shrink-0">{{ icon("info", "h-3.5 w-3.5") }}</span><span>{{ d.attention }}</span></p>{% endif %}
-      {% for label, items, cls in [("Zrobione", d.done, "text-emerald-700"), ("W toku", d.in_progress, "text-ink-muted"), ("Plan", d.next, "text-primary-ink"), ("Blokady", d.blockers, "text-red-700")] %}
+      {% if u.source == "os" %}
+      {% set groups = [("Zrobione", d.done, "text-emerald-700"), ("W toku", d.in_progress, "text-ink-muted"), ("Czeka", d.waiting, "text-amber-700"), ("Czekam na / potrzebuję", d.needs, "text-red-700"), ("Poza OS / notatki", d.outside_os, "text-ink-muted"), ("Fokus na jutro", d.next, "text-primary-ink"), ("Nie ruszone", d.not_touched, "text-ink-faint")] %}
+      {% else %}
+      {% set groups = [("Zrobione", d.done, "text-emerald-700"), ("W toku", d.in_progress, "text-ink-muted"), ("Plan", d.next, "text-primary-ink"), ("Blokady", d.blockers, "text-red-700")] %}
+      {% endif %}
+      {% for label, items, cls in groups %}
       {% if items %}
       <div>
         <div class="text-xs font-medium {{ cls }}">{{ label }}</div>
@@ -86,7 +109,18 @@
       {% endfor %}
       {% if d.focus %}<p class="text-xs text-ink-muted"><span class="font-medium text-ink-soft">Focus:</span> {{ d.focus }}</p>{% endif %}
     </div>
-    {% if d.os_updates or d.not_in_os or d.pushed_items %}
+    {% if u.source == "os" %}
+    {% if d.applied or d.pending_suggestions or d.analysis_status != "done" %}
+    <div class="space-y-1.5 border-t border-line bg-canvas/60 px-4 py-3 text-[13px]">
+      {% if d.applied %}
+      <div class="text-xs font-medium text-ink-muted">Zmienione w OS po raporcie (zatwierdził autor)</div>
+      <ul class="space-y-0.5 text-ink-soft">{% for a in d.applied %}<li class="flex gap-2"><span class="text-emerald-600">{{ icon("check", "h-3.5 w-3.5") }}</span><span>{{ a }}</span></li>{% endfor %}</ul>
+      {% endif %}
+      {% if d.pending_suggestions %}<p class="text-xs text-ink-muted">Propozycje AI czekające na decyzję autora: {{ d.pending_suggestions }}</p>{% endif %}
+      {% if d.analysis_status in ("running", "idle") %}<p class="text-xs text-ink-faint">Analiza AI w OS jeszcze trwa.</p>{% elif d.analysis_status == "error" %}<p class="text-xs text-ink-faint">Analiza AI w OS się nie udała — widać sam raport.</p>{% endif %}
+    </div>
+    {% endif %}
+    {% elif d.os_updates or d.not_in_os or d.pushed_items %}
     <div class="space-y-2 border-t border-line bg-canvas/60 px-4 py-3">
       <div class="text-xs font-medium text-ink-muted">Rozjazd z MyBed OS</div>
       {% for x in d.os_updates %}
@@ -122,15 +156,37 @@
   </article>
   {% endfor %}
 </div>
-{% elif o.channels_configured %}
-<div class="card">{{ empty("Brak raportów z tego dnia" ~ (" — kliknij „Przeanalizuj”, jeśli raporty są już na Slacku." if o.missing else "."), "inbox") }}</div>
+{% else %}
+<div class="card">{{ empty("Brak raportów z tego dnia" ~ (" — kliknij „Przeanalizuj Slacka”, jeśli raporty są już na Slacku." if o.mode != "os" and o.missing else "."), "inbox") }}</div>
 {% endif %}
 
-<p class="mt-5 text-xs text-ink-faint">Analiza: Claude Sonnet, automatycznie o 8:50, 12:50 i co godzinę 16:50–19:50 (dni robocze). {% if run %}Ostatnio {{ run.ran_at|ago }}.{% endif %} Skąd dane: <a class="underline" href="/sources/lineage">Skąd dane</a>.</p>
+<section class="card mt-5 p-5">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div class="min-w-0 max-w-2xl">
+      <h3 class="section-title">Źródło raportów dnia</h3>
+      {% if o.cutover %}
+      <p class="mt-1 text-xs text-ink-muted">Od <b>{{ o.cutover|datepl }}</b> raporty dnia są tylko w MyBed OS — Slack nie jest już analizowany ani liczony do braków. Wcześniejsze dni: OS, a dla osób bez raportu w OS — Slack.</p>
+      {% else %}
+      <p class="mt-1 text-xs text-ink-muted">Okres przejściowy: raport z MyBed OS ma pierwszeństwo, Slack liczy się tylko dla osób, które danego dnia nie napisały raportu w OS. Ustaw dzień przełączenia, gdy cały zespół raportuje w OS — od tego dnia braki liczymy według listy uczestników Daily Update.</p>
+      {% endif %}
+    </div>
+    <form class="flex items-center gap-2" onsubmit="saveCutover(event)">
+      <input type="date" name="cutover" class="input !py-1.5 text-[13px]" value="{{ o.cutover.isoformat() if o.cutover else '' }}" aria-label="Dzień przełączenia na MyBed OS">
+      <button class="btn-secondary shrink-0 !py-1.5 text-xs">Zapisz</button>
+    </form>
+  </div>
+</section>
+
+<p class="mt-5 text-xs text-ink-faint">Raporty z OS: odczyt na żywo przy każdym otwarciu i raporcie (analiza AI jest robiona w OS). Slack (okres przejściowy): Claude Sonnet, automatycznie o 8:50, 12:50 i co godzinę 16:50–19:50 (dni robocze). {% if run %}Ostatnio {{ run.ran_at|ago }}.{% endif %} Skąd dane: <a class="underline" href="/sources/lineage">Skąd dane</a>.</p>
 {% endblock %}
 
 {% block scripts %}
 <script>
+async function saveCutover(e) {
+  e.preventDefault()
+  try { await post('/api/team/cutover', new FormData(e.target)); toast('Zapisano', 'success'); setTimeout(() => location.reload(), 500) }
+  catch (err) { toast(err.message, 'error') }
+}
 async function suggest(btn) {
   const fd = new FormData()
   fd.append('day', btn.dataset.day); fd.append('person_key', btn.dataset.person)

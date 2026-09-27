@@ -44,11 +44,14 @@ SOURCES: dict[str, dict] = {
     "os": {
         "label": "MyBed Group OS",
         "icon": "layout-grid",
-        "what": "Zadania, projekty, blokery, decyzje i ludzie (tabela os_entities w Supabase OS).",
+        "what": "Zadania, projekty, blokery, decyzje, ludzie oraz dzienne raporty zespołu z Daily Update "
+                "(tabela os_entities w Supabase OS, kolekcja dailyUpdates).",
         "how": "Odczyt na żywo przy każdym raporcie (klucz serwisowy). Zapis tylko po Twojej akcji w panelu: "
                "prywatne zadanie ze zobowiązania albo propozycja AI.",
         "cadence": "na żywo przy raporcie; ludzie co 6 h",
-        "processing": "Twoje zadania (zaległe, na dziś), obciążenie zespołu, blokery, projekty wymagające uwagi, decyzje.",
+        "processing": "Twoje zadania (zaległe, na dziś), obciążenie zespołu, blokery, projekty wymagające uwagi, decyzje. "
+                      "Raporty dnia: analizę AI i decyzje o zmianach robi OS — agenci tylko je czytają, liczą braki "
+                      "raportów (uczestnicy z ustawień Daily Update, dni robocze, od 10:00 następnego dnia) i eskalacje.",
         "job": "os_people_sync",
         "health": None,
     },
@@ -91,8 +94,9 @@ SOURCES: dict[str, dict] = {
                 "dzienne raporty zespołu (#dev-daily-updates, #kamila-daily-update itd.).",
         "how": "Slack API (bot). Nowe wiadomości co 10 min; kanały prywatne wymagają zaproszenia bota.",
         "cadence": "co 10 min",
-        "processing": "AI czyta raport każdej osoby: co zrobiła, w toku, plan, blokery; dopasowuje to do jej zadań w OS "
-                      "i oznacza brak raportu albo brak planu.",
+        "processing": "Okres przejściowy: AI czyta raport ze Slacka tylko osób, które danego dnia nie napisały raportu "
+                      "w MyBed OS — co zrobiły, w toku, plan, blokery, dopasowanie do zadań w OS. Od dnia przełączenia "
+                      "(panel → Zespół) raporty dnia pochodzą wyłącznie z OS.",
         "job": "slack_sync",
         "health": "slack",
     },
@@ -111,7 +115,7 @@ SECTION_SOURCES: dict[str, list[str]] = {
     "email": ["gmail"],
     "os_me": ["os"],
     "team": ["os"],
-    "team_updates": ["slack", "os"],
+    "team_updates": ["os", "slack"],
     "projects": ["os"],
     "topics": ["whatsapp", "gmail", "os"],
     "slack": ["slack"],

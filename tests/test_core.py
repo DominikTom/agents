@@ -63,7 +63,7 @@ def test_prompt_lists_enabled_sections_in_order_with_notes():
     first = SECTION_CATALOG[p["sections"][0]["key"]]["label"]
     assert f"1. ## {first}" in prompt
     assert "tylko zarząd" in prompt and "Pisz krótko" in prompt and "Maciej Żydziak" in prompt
-    assert SECTION_CATALOG["slack"]["label"] not in prompt  # disabled by default
+    assert f"## {SECTION_CATALOG['slack']['label']} —" not in prompt  # disabled by default
 
 
 def test_dash_overview_math():
@@ -222,7 +222,7 @@ def test_lineage_sources_line():
     assert set(SECTION_SOURCES) == set(SECTION_CATALOG)
     assert all(src == "ai" or src in SOURCES for srcs in SECTION_SOURCES.values() for src in srcs)
     line = sources_line(["top", "sales", "chats", "team_updates"], "2026-09-22")
-    assert line.startswith("Hurtownia dash, IdeaERP, WhatsApp, Slack, MyBed Group OS") and line.endswith("liczby do 22.09")
+    assert line.startswith("Hurtownia dash, IdeaERP, WhatsApp, MyBed Group OS, Slack") and line.endswith("liczby do 22.09")
 
 
 def test_numeric_marking_is_idempotent_and_counts_cells_with_attributes():
@@ -320,3 +320,94 @@ def test_stored_html_from_old_reports_is_sanitised_on_display():
     assert '<ol start="3">' in out
     fresh = to_html("| Sklep | Przychód |\n|---|---:|\n| mybed.pl | 12 000 zł |")
     assert clean_stored_html(fresh) == fresh
+
+
+def _os_daily_fixture():
+    from src.processing.os_daily import DailyData
+
+    def rep(day, pid, status="submitted", **kw):
+        return {"id": f"du-{day}-{pid}", "date": day, "authorId": pid, "status": status, "items": [], "needs": [],
+                "plan": [], "suggestions": [], "analysis": {"status": "done", "runs": 1, "summary": ""}, **kw}
+
+    anna = rep("2026-09-28", "p-anna", items=[
+        {"kind": "task", "taskId": "t1", "title": "stary tytuł", "state": "done", "note": "wysłane"},
+        {"kind": "task", "taskId": "t2", "title": "Newsletter", "state": "waiting", "note": ""},
+        {"kind": "text", "title": "Telefon do drukarni", "state": "progress", "note": ""}],
+        extra="Cennik B2B\n", needs=[{"personId": "p-marek", "text": "akcept banerów do środy", "taskId": "t1"}],
+        plan=[{"kind": "task", "taskId": "t2", "title": "x"}], offReason=None,
+        comments=[{"text": "prywatna rozmowa"}], reopenedAt="2026-09-28T15:00:00Z",
+        suggestions=[{"status": "applied", "action": "set_status", "targetTitle": "Banery", "from": {"status": "Doing"},
+                      "to": {"status": "Review"}},
+                     {"status": "rejected", "action": "create_task", "task": {"title": "odrzucone"}},
+                     {"status": "pending", "action": "comment", "targetTitle": "X"}],
+        submittedAt="2026-09-28T14:21:07.000Z",
+        analysis={"status": "done", "runs": 1, "summary": "Zamknięte banery."})
+    rows = [
+        rep("2026-09-24", "p-anna", items=[{"taskId": "t2", "state": "waiting"}],
+            needs=[{"personId": "p-marek", "text": "akcept banerów BF", "taskId": "t1"}]),
+        rep("2026-09-25", "p-anna", items=[{"taskId": "t2", "state": "waiting"}],
+            needs=[{"personId": "p-marek", "text": "akcept banerów", "taskId": "t1"}]),
+        anna,
+        rep("2026-09-28", "p-ola", status="off", offReason="choroba"),
+        rep("2026-09-28", "p-jan", status="draft", metrics={"firstInputAt": "2026-09-28T10:00:00Z"}),
+    ]
+    return DailyData(rows=rows, settings={"enabled": True, "participantIds": ["p-anna", "p-ola", "p-jan", "p-ewa"]},
+                     people={p: {"id": p, "name": n} for p, n in [("p-anna", "Anna A"), ("p-ola", "Ola O"),
+                                                                  ("p-jan", "Jan J"), ("p-ewa", "Ewa E"),
+                                                                  ("p-marek", "Marek M")]},
+                     tasks={"t1": {"id": "t1", "title": "Banery BF"}, "t2": {"id": "t2", "title": "Newsletter CZ"}},
+                     blockers=[{"id": "b1", "title": "Brak akceptu", "status": "Open", "ownerId": "p-marek",
+                                "sourceDailyId": "du-2026-09-23-p-anna", "createdAt": "2026-09-23T10:00:00.000Z"},
+                               {"id": "b2", "title": "Nie z raportu", "status": "Open",
+                                "createdAt": "2026-09-01T10:00:00.000Z"}],
+                     start=date(2026, 9, 7), end=date(2026, 9, 28))
+
+
+def test_os_daily_report_view_hides_private_fields():
+    from src.processing.os_daily import report_view
+
+    dd = _os_daily_fixture()
+    v = report_view(dd.for_day(date(2026, 9, 28))[0], dd)
+    d = v["data"]
+    assert v["person_name"] == "Anna A" and v["link"].endswith("/daily?r=du-2026-09-28-p-anna")
+    assert d["done"] == ["Banery BF — wysłane"]  # current task title, not the copy
+    assert d["waiting"] == ["Newsletter CZ"] and d["in_progress"] == ["Telefon do drukarni (poza OS)"]
+    assert d["outside_os"] == ["Cennik B2B"] and d["outside_os_items"] == ["Telefon do drukarni"]
+    assert d["needs"] == ["Marek M: akcept banerów do środy"] and d["next"] == ["Newsletter CZ"]
+    assert d["applied"] == ["Banery: Doing → Review"] and d["pending_suggestions"] == 1
+    assert d["plan_quality"] == "clear" and d["edited_after_submit"] and d["summary"] == "Zamknięte banery."
+    flat = str(v)
+    assert "odrzucone" not in flat and "prywatna rozmowa" not in flat and "choroba" not in flat
+
+
+def test_os_daily_missing_rule_and_escalations():
+    from datetime import datetime
+
+    from src.common.timeutil import WARSAW
+    from src.processing.os_daily import escalations, missing_for
+
+    dd = _os_daily_fixture()
+    day = date(2026, 9, 28)  # Monday
+    status, missing, not_yet = missing_for(day, dd, datetime(2026, 9, 28, 18, 0, tzinfo=WARSAW))
+    assert status == "day_in_progress" and not missing
+    assert [(m["name"], m["state"]) for m in not_yet] == [("Ewa E", "brak"), ("Jan J", "szkic")]
+    status, missing, _ = missing_for(day, dd, datetime(2026, 9, 29, 10, 5, tzinfo=WARSAW))
+    assert status == "ok" and [m["name"] for m in missing] == ["Ewa E", "Jan J"]  # off = excused, draft = missing
+    assert missing_for(date(2026, 9, 27), dd)[0] == "weekend"
+    assert missing_for(date(2026, 11, 11), dd, datetime(2026, 11, 12, 12, 0, tzinfo=WARSAW))[0] == "weekend"
+
+    now_ = datetime(2026, 9, 29, 10, 5, tzinfo=WARSAW)
+    texts = [e["text"] for e in escalations(day, dd, now_, os_from=date(2026, 9, 24))]
+    assert any("czeka na Marek M" in t and "od 2026-09-24" in t for t in texts)  # same request for 2 workdays
+    assert any("Newsletter CZ" in t and "3 raportów" in t for t in texts)  # waiting 3 reports in a row
+    assert any("Brak akceptu" in t for t in texts) and not any("Nie z raportu" in t for t in texts)
+    missing_streak = [e for e in escalations(day, dd, now_, os_from=date(2026, 9, 24)) if e["type"] == "missing"]
+    assert {e["person"] for e in missing_streak} == {"Ewa E", "Jan J"}  # Thu, Fri, Mon without a report
+    assert not [e for e in escalations(day, dd, now_, os_from=date.max) if e["type"] == "missing"]
+
+
+def test_workdays_follow_polish_holidays():
+    from src.common.timeutil import is_workday, previous_workday
+
+    assert not is_workday(date(2026, 11, 11)) and not is_workday(date(2026, 6, 4))  # Independence Day, Corpus Christi
+    assert previous_workday(date(2026, 11, 12)) == date(2026, 11, 10)

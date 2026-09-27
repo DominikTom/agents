@@ -1441,7 +1441,8 @@ class Database:
         return await self._fetchall(
             "SELECT metadata->>'user_id' AS user_id, "
             "COALESCE(MAX(NULLIF(metadata->>'user_name', metadata->>'user_id')), metadata->>'user_id') AS user_name, "
-            "COUNT(DISTINCT (timestamp AT TIME ZONE 'Europe/Warsaw')::date) AS days, MAX(timestamp) AS last_at "
+            "COUNT(DISTINCT (timestamp AT TIME ZONE 'Europe/Warsaw')::date) AS days, MAX(timestamp) AS last_at, "
+            "MAX(sender_entity_id) AS entity_id "
             "FROM events WHERE source = 'slack' AND timestamp >= $1 AND ($3::timestamptz IS NULL OR timestamp < $3) "
             "AND metadata->>'channel_id' = ANY($2::text[]) "
             "AND NOT COALESCE((metadata->>'is_reply')::boolean, false) GROUP BY 1",

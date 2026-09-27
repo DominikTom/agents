@@ -770,7 +770,7 @@ async def team_page(request: Request, day: str | None = None):
     except ValueError:
         d = None
     if d is None:
-        d = t if (await db.get_team_updates(t, t)) else last_workday(t) if t.weekday() >= 5 or now().hour < 15 else t
+        d = t if t.weekday() < 5 and (now().hour >= 15 or await db.get_team_updates(t, t)) else last_workday(t)
     overview = await team_overview(db, d)
     prev_d = last_workday(d)
     next_d = d + timedelta(days=1)
@@ -781,6 +781,23 @@ async def team_page(request: Request, day: str | None = None):
     return render(request, "team.html", "team", o=overview, day=d, prev_day=prev_d,
                   next_day=next_d if next_d <= t else None, run=run,
                   can_suggest=bool(general.get("push_to_os_suggestions")), config=data.config_status())
+
+
+@app.post("/api/team/cutover")
+async def team_cutover(request: Request, cutover: str = Form("")):
+    """Day from which the team reports only in MyBed OS (empty = transition period, Slack still counts)."""
+    if not authed(request):
+        return unauthorized()
+    value = cutover.strip()
+    if value:
+        try:
+            date.fromisoformat(value)
+        except ValueError:
+            return JSONResponse({"error": "zła data"}, status_code=400)
+    db = get_db_sync()
+    stored = await db.get_setting("daily_source", {}) or {}
+    await db.set_setting("daily_source", {**stored, "cutover": value or None})
+    return {"ok": True, "cutover": value or None}
 
 
 @app.post("/api/team/analyze")

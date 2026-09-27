@@ -192,8 +192,9 @@ async def get_latest_report(report: str = "morning_briefing") -> str:
 
 @mcp.tool()
 async def get_team_updates(day: str = "") -> str:
-    """Team daily reports from Slack (AI-read): per person done / in progress / plan / blockers, OS mismatches,
-    who did not report. day: YYYY-MM-DD, default = last workday (or today after 15:00)."""
+    """Team daily reports: MyBed OS Daily Update (and, before the switch day set in the panel, Slack for people
+    without an OS report). Per person: done / in progress / waiting / plan / needs, changes the author approved
+    in OS, who did not report, escalations. day: YYYY-MM-DD, default = last workday (or today after 15:00)."""
     from src.common.timeutil import now, today
     from src.processing.team_updates import last_workday, team_overview
 
@@ -206,17 +207,25 @@ async def get_team_updates(day: str = "") -> str:
         t = today()
         d = t if t.weekday() < 5 and now().hour >= 15 else last_workday(t)
     o = await team_overview(db, d)
-    if not o["channels_configured"]:
-        return "No Slack daily-report channels configured (panel → Źródła → Slack)."
+    if o["mode"] != "os" and not o["channels_configured"] and not o["updates"] and o["os_error"]:
+        return f"No daily reports source: {o['os_error']}; no Slack daily-report channels configured."
+    keys = ("summary", "done", "in_progress", "waiting", "next", "needs", "blockers", "outside_os", "plan_quality",
+            "applied", "pending_suggestions", "focus", "attention", "os_updates", "not_in_os")
     return json.dumps({
         "day": d.isoformat(),
+        "source": o["mode"],
+        "switch_to_os_only_on": o["cutover"],
         "missing_report": [m["name"] for m in o["missing"]],
         "missing_check": o["missing_status"],
+        "not_yet_reported": [m["name"] for m in o["not_yet"]],
+        "absent": o["absent"],
+        "escalations": [e["text"] for e in o["escalations"]],
         "posted_but_not_analyzed": o["not_analyzed"],
         "no_plan": o["no_plan"],
-        "people": [{"person": u["person_name"], **{k: (u["data"] or {}).get(k) for k in
-                   ("summary", "done", "in_progress", "next", "blockers", "focus", "plan_quality", "attention",
-                    "os_updates", "not_in_os")}} for u in o["updates"]],
+        "os_error": o["os_error"],
+        "people": [{"person": u["person_name"], "from": u.get("source", "slack"), "link": u.get("link"),
+                    **{k: v for k, v in (u["data"] or {}).items() if k in keys and v not in (None, [], "", 0)}}
+                   for u in o["updates"]],
     }, ensure_ascii=False, indent=1, default=str)
 
 

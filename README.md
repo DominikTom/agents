@@ -6,7 +6,7 @@ AI chief of staff dla CEO MyBed Group. Czyta WhatsApp, Gmail, kalendarz, MyBed G
 - **Rozumienie czatów**: raz dziennie AI streszcza każdy aktywny czat (kontekst odpowiedzi, znaczniki głosówek i plików, role osób w firmie). Wychodzą z tego ustalenia, otwarte kwestie, informacja „czeka na Twoją odpowiedź” i zobowiązania.
 - **Zobowiązania**: co obiecałeś, o co Cię proszono i co inni obiecali Tobie. Po zatwierdzeniu trafiają do MyBed OS jako prywatne zadanie.
 - **Pulpit**: KPI sprzedaży, rozmowy i maile czekające na odpowiedź, kalendarz, zadania z OS.
-- **Raporty dnia zespołu** (Zespół): bot czyta kanały Slack z dziennymi raportami (#dev-daily-updates, #kamila-daily-update…). AI streszcza raport każdej osoby, porównuje go z jej zadaniami w MyBed OS i oznacza brak raportu, brak planu i blokady. Do OS nic nie trafia bez kliknięcia.
+- **Raporty dnia zespołu** (Zespół): źródłem jest **MyBed OS → Daily Update** (kolekcja `dailyUpdates`). Analizę AI i zmiany w zadaniach robi OS, a zatwierdza sam autor raportu. Agenci tylko czytają: pokazują raport, zmiany w OS, braki raportu (lista uczestników Daily Update, dni robocze ze świętami, od 10:00 następnego dnia roboczego) i eskalacje (prośby bez reakcji, zadania „czekam” w 3 raportach z rzędu, seria dni bez raportu, stare blokery z raportów). Okres przejściowy: dla osób bez raportu w OS liczy się jeszcze Slack (AI czyta kanały daily). Dzień przełączenia na „tylko OS” ustawiasz na stronie Zespół. Kontrakt danych: repo OS, `docs/DAILY_REPORTS_FOR_AGENTS.md`.
 - **Liczby w raportach**: tabela KPI (okresy 1/3/7/30 dni, sklepy, Meta i Google Ads, zmiana % do poprzedniego okresu) liczona kodem z hurtowni dash, nie przez AI. Okresy i wskaźniki wybierasz w Studio.
 - **Skąd dane**: strona w panelu, która pokazuje dla każdego źródła, co czytamy, jak często i które sekcje raportów z niego korzystają.
 - **Serwer MCP** dla Claude.ai, czyli pytania do całej bazy wiedzy z czatu. Połączenie wymaga logowania i zgody w panelu.
@@ -53,7 +53,7 @@ Potem w panelu: **Źródła → WhatsApp** → zeskanuj kod QR (albo „Połącz
 
 Usunięte: `ASANA_*`, `SHOPER_*`, `SHOPIFY_*`.
 
-### Slack (raporty na Slacka + dzienne raporty zespołu)
+### Slack (raporty na Slacka + dzienne raporty zespołu w okresie przejściowym)
 
 1. `SLACK_BOT_TOKEN` w `.env` — token bota „Daily Agent” (api.slack.com/apps → OAuth & Permissions → Bot User OAuth Token, `xoxb-…`).
 2. Uprawnienia bota (Bot Token Scopes): `chat:write`, `channels:read`, `groups:read`, `channels:history`, `groups:history`, `users:read` (opcjonalnie `users:read.email`). Po dodaniu: „Reinstall to Workspace”. Panel **Źródła → Slack** pokazuje, czego brakuje.
