@@ -80,6 +80,7 @@ def kpi_data(overview: dict, cfg: dict) -> dict | None:
     headline = [m for m in HEADLINE_ORDER if m in metrics][:4]
     return {
         "as_of": overview.get("date"),
+        "note": overview.get("missing_note") or "",
         "per_shop": per_shop,
         "metrics": [{"key": m, "label": KPI_METRICS[m]} for m in metrics],
         "headline": headline,
@@ -129,7 +130,7 @@ def tables(data: dict) -> list[dict]:
 
 def _cell(c: dict, metric: str) -> dict:
     """Table cell: the unit (zł) lives in the row label, so wide tables still fit a phone screen."""
-    return {"value": fmt_value(c.get("v"), metric, unit=False),
+    return {"value": fmt_value(c.get("v"), metric, unit=False), "raw": c.get("v"),
             "pct": fmt_pct(c.get("pct")) if c.get("pct") is not None else "",
             "tone": tone(c.get("pct"), metric)}
 
@@ -141,6 +142,8 @@ def kpi_markdown(data: dict | None) -> str:
     if not data:
         return ""
     out = ["## Liczby", "", "W nawiasie zmiana do poprzedniego okresu o tej samej długości."]
+    if data.get("note"):
+        out += ["", f"⚠️ {data['note']}"]
     for t in tables(data):
         cols = [c.replace("\n", " ") for c in t["columns"]]
         out += ["", f"**{t['title']}** · {t['subtitle']}", "", "| | " + " | ".join(cols) + " |", "|---|" + "---:|" * len(cols)]
@@ -171,6 +174,14 @@ def _chip(pct: str, t: str) -> str:
     fg, bg = TONES[t]
     return (f'<span style="display:inline-block;padding:1px 6px;border-radius:6px;background:{bg};color:{fg};'
             f'font-size:11px;line-height:16px;font-weight:600;{NUM}">{html.escape(pct)}</span>')
+
+
+def _compact(c: dict) -> str:
+    """E-mail tables only: 7-digit amounts as '8,51 mln' so the per-shop table fits a 320–360px phone."""
+    raw = c.get("raw")
+    if raw is not None and abs(raw) >= 1_000_000:
+        return f"{raw / 1_000_000:.2f}".replace(".", ",") + "\u00a0mln"
+    return c["value"]
 
 
 def kpi_email_html(data: dict | None) -> str:
@@ -205,15 +216,15 @@ def kpi_email_html(data: dict | None) -> str:
     )
     for t in tables(data):
         head = "".join(
-            f'<th align="right" style="padding:6px 0 6px 6px;border-bottom:1px solid {LINE};font-size:11px;line-height:14px;'
-            f'font-weight:600;color:{MUTED};white-space:nowrap;">{"<br>".join(e(x) for x in col.split(chr(10)))}</th>'
+            f'<th align="right" style="padding:6px 0 6px 4px;border-bottom:1px solid {LINE};font-size:11px;line-height:14px;'
+            f'font-weight:600;color:{MUTED};">{"<br>".join(e(x) for x in col.split(chr(10)))}</th>'
             for col in t["columns"]
         )
         body = []
         for r in t["rows"]:
             tds = "".join(
-                f'<td align="right" valign="top" style="padding:7px 0 7px 6px;border-bottom:1px solid {LINE};{NUM}">'
-                f'<div style="font-size:13px;line-height:18px;color:{INK};">{e(c["value"])}</div>'
+                f'<td align="right" valign="top" style="padding:7px 0 7px 4px;border-bottom:1px solid {LINE};{NUM}">'
+                f'<div style="font-size:12px;line-height:17px;color:{INK};">{e(_compact(c))}</div>'
                 + (f'<div style="font-size:11px;line-height:15px;font-weight:600;color:{TONES[c["tone"]][0]};">{e(c["pct"])}</div>' if c["pct"] else "")
                 + "</td>"
                 for c in r["cells"]
@@ -230,8 +241,11 @@ def kpi_email_html(data: dict | None) -> str:
             f'<tr><th align="left" style="padding:6px 6px 6px 0;border-bottom:1px solid {LINE};"></th>{head}</tr>'
             + "".join(body) + "</table>"
         )
+    if data.get("note"):
+        parts.append(f'<div style="margin:10px 0 0;padding:8px 10px;border-radius:8px;background:#FFFBEB;color:#B45309;'
+                     f'font-size:12px;line-height:17px;">{e(data["note"])}</div>')
     parts.append(
-        f'<div style="margin:8px 0 0;font-size:11px;line-height:16px;color:{FAINT};">Liczby liczone automatycznie z hurtowni '
+        f'<div style="margin:8px 0 0;font-size:11px;line-height:16px;color:{MUTED};">Liczby liczone automatycznie z hurtowni '
         f'dash (sprzedaż, Meta) i GA4 (Google Ads), dane do {e(_d(data["as_of"])) if data.get("as_of") else "wczoraj"}. '
         'Zmiana % względem poprzedniego okresu o tej samej długości.</div>'
     )

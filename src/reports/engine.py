@@ -111,6 +111,8 @@ class ReportEngine:
             if (profile.get("kpi") or {}).get("enabled"):
                 try:
                     kpi = kpi_data(await ctx.dash(), profile["kpi"])
+                    if kpi and kpi.get("note"):
+                        errors["kpi"] = kpi["note"]
                 except Exception as e:
                     errors["kpi"] = str(e)[:200]
             kpi_md = kpi_markdown(kpi)
@@ -167,7 +169,7 @@ class ReportEngine:
                 await self.db.log_run(key, "success", duration_ms=duration)
             logger.info(f"[{key}] report {report_id} done in {duration} ms (errors: {list(errors)})")
             return {"id": report_id, "title": title, "lead": lead, "markdown": body, "html": html_body,
-                    "errors": errors, "delivered": delivered}
+                    "errors": errors, "delivered": delivered, "kpi": kpi}
         except Exception as e:
             logger.exception(f"[{key}] report failed")
             if not preview:
@@ -203,11 +205,14 @@ class ReportEngine:
     async def deliver(self, report_id: int, profile: dict, general: dict, title: str, lead: str,
                       body: str, html_body: str, meta: dict | None = None) -> dict:
         meta = meta or {}
-        delivered: dict = {}
+        # keep what earlier deliveries recorded (a Slack-only resend must not erase the e-mail record)
+        delivered: dict = dict(meta.get("delivered") or {})
         base_url = (get_env_optional("PUBLIC_BASE_URL") or get_env_optional("MCP_BASE_URL") or "").rstrip("/")
         url = f"{base_url}/reports/{report_id}" if base_url else None
 
         if profile.get("email"):
+            delivered.pop("email", None)
+            delivered.pop("email_error", None)
             recipients = profile.get("recipients") or general.get("recipients") or []
             if email_configured() and recipients:
                 try:
@@ -232,13 +237,14 @@ class ReportEngine:
 
         channel = (profile.get("slack_channel") or "").strip()
         if channel:
+            delivered.pop("slack", None)
+            delivered.pop("slack_error", None)
             try:
                 from src.outputs.slack_output import md_to_slack, post_text
 
                 text = f"*{title}*\n{md_to_slack(lead)}\n\n{md_to_slack(body)}"
                 await post_text(channel, text + (f"\n\n<{url}|Otwórz w panelu>" if url else ""))
                 delivered["slack"] = channel
-                delivered.pop("slack_error", None)
             except Exception as e:
                 logger.error(f"Slack delivery failed: {e}")
                 delivered["slack_error"] = str(e)[:300]

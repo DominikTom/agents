@@ -211,6 +211,8 @@ async def get_team_updates(day: str = "") -> str:
     return json.dumps({
         "day": d.isoformat(),
         "missing_report": [m["name"] for m in o["missing"]],
+        "missing_check": o["missing_status"],
+        "posted_but_not_analyzed": o["not_analyzed"],
         "no_plan": o["no_plan"],
         "people": [{"person": u["person_name"], **{k: (u["data"] or {}).get(k) for k in
                    ("summary", "done", "in_progress", "next", "blockers", "focus", "plan_quality", "attention",

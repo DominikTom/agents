@@ -96,8 +96,7 @@ class TeamUpdates:
         self.ai = ai or AIClient(db=db)
 
     async def daily_channel_ids(self) -> list[str]:
-        channels = ((await self.db.get_setting("slack", {})) or {}).get("channels", {}) or {}
-        return [cid for cid, c in channels.items() if c.get("daily") and c.get("read")]
+        return await daily_channel_ids(self.db)
 
     async def run(self, day: date | None = None, force: bool = False) -> dict:
         day = day or today()
@@ -105,26 +104,27 @@ class TeamUpdates:
         if not channel_ids:
             return {"skipped": "brak kanałów z raportami dziennymi (Źródła → Slack)"}
         start, end = day_range(day)
-        messages = await self.db.get_slack_messages(start, end, channel_ids)
-        groups: dict[str, list[dict]] = {}
-        for m in messages:
-            uid = m["metadata"].get("user_id")
-            if uid:
-                groups.setdefault(uid, []).append(m)
-        known = await self.db.get_team_update_fps(day)
+        groups = group_reports(await self.db.get_slack_messages(start, end, channel_ids))
+        existing = {u["person_key"]: u for u in await self.db.get_team_updates(day, day)}
         snapshot = await self._os_snapshot()
         done = skipped = 0
+        failed: list[str] = []
         for uid, msgs in groups.items():
-            fp = fingerprint([m["id"] for m in msgs], [m["body"] or "" for m in msgs])
-            if not force and known.get(uid) == fp:
+            fp = fingerprint([m["id"] for m in msgs], [m["body"] or "" for m in msgs]) + ("" if snapshot else ":no-os")
+            old = existing.get(uid)
+            if not force and old and old.get("fingerprint") == fp:
                 skipped += 1
                 continue
             try:
-                await self._analyze(day, uid, msgs, fp, snapshot)
+                await self._analyze(day, uid, msgs, fp, snapshot, (old or {}).get("data") or {})
                 done += 1
             except Exception as e:
                 logger.warning(f"Team update {uid} {day}: {e}")
-        return {"day": day.isoformat(), "people": len(groups), "analyzed": done, "unchanged": skipped}
+                failed.append(msgs[0]["metadata"].get("user_name") or uid)
+        out = {"day": day.isoformat(), "people": len(groups), "analyzed": done, "unchanged": skipped}
+        if failed:
+            out["error"] = f"analiza nieudana dla {len(failed)} os.: {', '.join(failed)}"
+        return out
 
     async def _os_snapshot(self):
         from src.connectors.os_mybed import OSClient
@@ -138,17 +138,19 @@ class TeamUpdates:
             logger.warning(f"OS snapshot for team updates failed: {e}")
             return None
 
-    async def _analyze(self, day: date, uid: str, msgs: list[dict], fp: str, snapshot) -> None:
-        name = msgs[0]["metadata"].get("user_name") or uid
-        entity_id = next((m["sender_entity_id"] for m in msgs if m.get("sender_entity_id")), None)
+    async def _analyze(self, day: date, uid: str, msgs: list[dict], fp: str, snapshot, previous: dict) -> None:
+        own = [m for m in msgs if m["metadata"].get("user_id") == uid]
+        name = (own or msgs)[0]["metadata"].get("user_name") or uid
+        entity_id = next((m["sender_entity_id"] for m in own if m.get("sender_entity_id")), None)
         entity = await self.db.get_entity(entity_id) if entity_id else None
         meta = (entity or {}).get("metadata") or {}
         os_id = meta.get("os_id")
         person = (entity or {}).get("display_name") or name
         role = meta.get("role") or ""
+        os_checked = bool(snapshot and os_id)
 
         tasks, projects = [], []
-        if snapshot and os_id:
+        if os_checked:
             for t in snapshot.data.get("tasks", []):
                 if (t.get("assigneeId") or t.get("ownerId")) != os_id or t.get("parentTaskId"):
                     continue
@@ -161,54 +163,134 @@ class TeamUpdates:
                                if p.get("status") not in {"Done", "Cancelled"} and p.get("title")})
         tasks = tasks[:80]
 
-        lines = [f"[{to_local(m['timestamp']).strftime('%H:%M')} #{m['metadata'].get('channel_name')}"
-                 f"{' — odpowiedź w wątku' if m['metadata'].get('is_reply') else ''}]\n{m['body']}" for m in msgs]
+        def line(m: dict) -> str:
+            md = m["metadata"]
+            if md.get("user_id") != uid:
+                tag = f" — komentarz od {md.get('user_name')} w wątku (kontekst, nie część raportu)"
+            elif md.get("is_reply"):
+                tag = " — odpowiedź autora w wątku"
+            else:
+                tag = ""
+            return f"[{to_local(m['timestamp']).strftime('%H:%M')} #{md.get('channel_name')}{tag}]\n{m['body']}"
+
+        if os_checked:
+            os_block = (f"=== ZADANIA TEJ OSOBY W MYBED OS ({len(tasks)}) ===\n" + json.dumps(tasks, ensure_ascii=False)
+                        + "\n\n=== AKTYWNE PROJEKTY W OS ===\n" + ", ".join(projects[:120]))
+        else:
+            reason = "osoba nie jest powiązana z OS" if not os_id else "MyBed OS jest chwilowo niedostępny"
+            os_block = (f"=== MYBED OS: {reason} — NIE porównuj z OS: os_updates i not_in_os zostaw puste ===")
         content = (
             f"Dzień: {fmt_date_pl(day)}\nOsoba: {person}{f' — {role}' if role else ''}\n\n"
-            f"=== RAPORT ZE SLACKA ===\n" + "\n\n".join(lines) + "\n\n"
-            f"=== ZADANIA TEJ OSOBY W MYBED OS ({'brak powiązania z OS' if not os_id else len(tasks)}) ===\n"
-            + json.dumps(tasks, ensure_ascii=False) + "\n\n"
-            "=== AKTYWNE PROJEKTY W OS ===\n" + ", ".join(projects[:120])
+            "=== RAPORT ZE SLACKA ===\n" + "\n\n".join(line(m) for m in msgs) + "\n\n" + os_block
         )
         result = await self.ai.extract(system=SYSTEM, content=content, schema=UPDATE_SCHEMA,
                                        max_tokens=6000, purpose="team_updates")
         by_id = {t["task_id"]: t for t in tasks}
         link = (snapshot.app_url if snapshot else "https://os.mybed.cloud").rstrip("/")
         updates = []
-        for u in result.get("os_updates", []):
+        for u in result.get("os_updates", []) if os_checked else []:
             t = by_id.get(u.get("task_id"))
             if not t or (u.get("suggested_status") == t.get("status")):
                 continue  # hallucinated id or nothing to change
             updates.append({**u, "title": t["title"], "current_status": t["status"], "project": t.get("project"),
                             "link": f"{link}/?p=task:{t['task_id']}"})
         result["os_updates"] = updates
+        if not os_checked:
+            result["not_in_os"] = []
         result["os_linked"] = bool(os_id)
+        result["os_checked"] = os_checked
         result["os_open_tasks"] = sum(1 for t in tasks if t["status"] != "Done")
+        # suggestions already sent to OS stay marked after a re-analysis (keyed by content, not position)
+        result["pushed_keys"] = list(previous.get("pushed_keys") or [])
         await self.db.upsert_team_update({
             "day": day, "person_key": uid, "person_name": person, "entity_id": entity_id, "os_person_id": os_id,
             "channels": sorted({m["metadata"].get("channel_name") for m in msgs if m["metadata"].get("channel_name")}),
             "event_ids": [m["id"] for m in msgs], "fingerprint": fp, "data": result,
-            "first_message_at": msgs[0]["timestamp"],
+            "first_message_at": (own or msgs)[0]["timestamp"],
         })
 
 
-async def team_overview(db: Database, day: date) -> dict:
-    """Reports of one day + who usually reports but didn't (missing) — for the panel and the reports."""
-    updates = await db.get_team_updates(day, day)
+def suggestion_key(kind: str, item: dict) -> str:
+    """Stable identity of a suggestion (survives re-analysis and reordering)."""
+    if kind == "os_update":
+        return f"os_update:{item.get('task_id')}:{item.get('suggested_status')}"
+    return "not_in_os:" + " ".join((item.get("title") or "").lower().split())
+
+
+def group_reports(messages: list[dict]) -> dict[str, list[dict]]:
+    """Daily report per author: their top-level posts + their own thread replies. Other people's replies in
+    that author's thread ride along as context; someone who only commented never gets a report of their own."""
+    groups: dict[str, list[dict]] = {}
+    thread_owner: dict[str, str] = {}
+    for m in messages:
+        md = m["metadata"]
+        if not md.get("is_reply") and md.get("user_id"):
+            groups.setdefault(md["user_id"], []).append(m)
+            thread_owner[md.get("ts")] = md["user_id"]
+    for m in messages:
+        md = m["metadata"]
+        if not md.get("is_reply"):
+            continue
+        uid, owner = md.get("user_id"), thread_owner.get(md.get("thread_ts"))
+        if uid in groups:
+            groups[uid].append(m)
+        elif owner in groups:
+            groups[owner].append(m)
+    for msgs in groups.values():
+        msgs.sort(key=lambda x: x["timestamp"])
+    return groups
+
+
+async def daily_channel_ids(db: Database, members_only: bool = False) -> list[str]:
     channels = ((await db.get_setting("slack", {})) or {}).get("channels", {}) or {}
-    daily_ids = [cid for cid, c in channels.items() if c.get("daily") and c.get("read")]
-    start, _ = day_range(day - timedelta(days=21))
-    reporters = await db.get_slack_reporters(start, daily_ids)
-    reported = {u["person_key"] for u in updates}
-    missing = []
-    if day.weekday() < 5:
-        for r in reporters:
-            if r["user_id"] not in reported and int(r["days"] or 0) >= 3:
-                missing.append({"name": r["user_name"], "report_days_21d": int(r["days"]), "last_at": r["last_at"]})
+    return [cid for cid, c in channels.items()
+            if c.get("daily") and c.get("read") and (c.get("member", True) or not members_only)]
+
+
+MISSING_CUTOFF_HOUR = 20  # reports come in the afternoon; "missing" is decided only after the day is over
+
+
+async def team_overview(db: Database, day: date) -> dict:
+    """Reports of one day + who usually reports but didn't (missing) — for the panel and the reports.
+
+    "Reported" comes from the Slack messages themselves (an AI analysis that failed or has not run yet
+    must not turn into a false alarm). "Missing" is only computed when it can be trusted: the day is
+    over, the bot still reads the channels and the Slack sync is healthy."""
+    from src.common.timeutil import now
+
+    updates = await db.get_team_updates(day, day)
+    all_daily = await daily_channel_ids(db)
+    daily_ids = await daily_channel_ids(db, members_only=True)
+    start, end = day_range(day)
+    msgs = await db.get_slack_messages(start, end, daily_ids) if daily_ids else []
+    reported = {m["metadata"].get("user_id") for m in msgs if not m["metadata"].get("is_reply")}
+
+    missing, missing_status = [], "ok"
+    current = now()
+    if day.weekday() >= 5:
+        missing_status = "weekend"
+    elif day > current.date() or (day == current.date() and current.hour < MISSING_CUTOFF_HOUR):
+        missing_status = "day_in_progress"
+    else:
+        run = (await db.get_last_run_any(["slack_sync"])).get("slack_sync")
+        healthy = run and run.get("status") == "success" and to_local(run["ran_at"]) >= to_local(end)
+        if not daily_ids or len(daily_ids) < len(all_daily):
+            missing_status = "channels_unreadable"
+        elif not healthy and day >= current.date() - timedelta(days=1):
+            missing_status = "sync_unhealthy"
+        else:
+            reporters = await db.get_slack_reporters(day_range(day - timedelta(days=21))[0], daily_ids, until=end)
+            for r in reporters:
+                if r["user_id"] not in reported and int(r["days"] or 0) >= 3:
+                    missing.append({"name": r["user_name"], "report_days_21d": int(r["days"]), "last_at": r["last_at"]})
+    analyzed = {u["person_key"] for u in updates}
     return {
         "day": day,
         "updates": updates,
         "missing": sorted(missing, key=lambda m: m["name"] or ""),
+        "missing_status": missing_status,
+        "not_analyzed": sorted({m["metadata"].get("user_name") for m in msgs
+                                if not m["metadata"].get("is_reply") and m["metadata"].get("user_id") not in analyzed}),
         "no_plan": [u["person_name"] for u in updates if (u["data"] or {}).get("plan_quality") == "missing"],
-        "channels_configured": bool(daily_ids),
+        "channels_configured": bool(all_daily),
     }

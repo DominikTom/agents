@@ -31,7 +31,10 @@ def test_email_html_inlines_styles():
     assert 'style="' in out and "Otwórz w panelu" in out
 
 
-def test_session_tokens_roundtrip_and_tamper():
+def test_session_tokens_roundtrip_and_tamper(monkeypatch):
+    monkeypatch.setenv("DASHBOARD_USERNAME", "admin")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "test-password")
+    monkeypatch.delenv("SESSION_SECRET", raising=False)
     token = make_token("admin")
     assert verify_session(token)
     assert not verify_session(token[:-2] + "xx")
@@ -220,3 +223,74 @@ def test_lineage_sources_line():
     assert all(src == "ai" or src in SOURCES for srcs in SECTION_SOURCES.values() for src in srcs)
     line = sources_line(["top", "sales", "chats", "team_updates"], "2026-09-22")
     assert line.startswith("Hurtownia dash, IdeaERP, WhatsApp, Slack, MyBed Group OS") and line.endswith("liczby do 22.09")
+
+
+def test_numeric_marking_is_idempotent_and_counts_cells_with_attributes():
+    from src.reports.render import _mark_numeric_columns
+
+    html = to_html("| Sklep | Przychód | Komentarz |\n|---|---:|---|\n| mybed.pl | 209 049 zł | Dobry dzień |\n"
+                   "| mybed.de | 60 859 zł | 2 (rabat dla hotelu jutro) |")
+    assert _mark_numeric_columns(html) == html
+    assert '<th>Komentarz</th>' in html and '<td>Dobry dzień</td>' in html
+    assert to_html('## A {: onclick="x()" }').count("onclick=") == 1  # stays text, not an attribute
+    assert "<h2>" in to_html('## A {: onclick="x()" }')
+
+
+def test_group_reports_threads():
+    from datetime import datetime, timezone
+
+    from src.processing.team_updates import group_reports
+
+    def m(i, uid, ts, reply=None):
+        return {"id": i, "timestamp": datetime(2026, 9, 24, 14, i, tzinfo=timezone.utc), "body": f"b{i}",
+                "metadata": {"user_id": uid, "user_name": uid, "ts": ts, "is_reply": reply is not None,
+                             "thread_ts": reply}}
+
+    msgs = [m(1, "KAMILA", "100.1"), m(2, "CEO", "100.2", reply="100.1"), m(3, "KAMILA", "100.3", reply="100.1"),
+            m(4, "SZYMON", "100.4", reply="100.1")]
+    g = group_reports(msgs)
+    assert set(g) == {"KAMILA"}  # commenters never get a "report" of their own
+    assert [x["id"] for x in g["KAMILA"]] == [1, 2, 3, 4]
+
+
+def test_slack_clean_text_names_are_not_regex_templates():
+    import asyncio
+
+    from src.connectors.slack_api import SlackAPI
+
+    api = SlackAPI(token="x")
+    api._users["U1"] = {"id": "U1", "name": "Jan \\Kowalski \\g<0>", "email": "", "bot": False}
+    out = asyncio.run(api.clean_text("hej <@U1> zobacz <https://a.pl|link>"))
+    assert out == "hej @Jan \\Kowalski \\g<0> zobacz link (https://a.pl)"
+
+
+def test_slack_chunks_closing_fence_on_boundary():
+    from src.outputs.slack_output import _chunks
+
+    body = "x" * 3790 + "\n```\n" + "y\n" * 10
+    text = "```\n" + body[:3790 - 4] + "\n```\n\n• dalej\n" + "z" * 100
+    for size in range(3780, 3800):
+        for part in _chunks(text, size):
+            assert not part.startswith("```\n```"), size
+            assert part.count("```") % 2 == 0
+
+
+def test_kpi_missing_source_shows_no_data_instead_of_zero():
+    from src.reports.kpi import headline_cards, kpi_data
+
+    ref = date(2026, 9, 22)
+    rows = [{"date": (ref - timedelta(days=i)).isoformat(), "source_shop": "mybed.pl", "orders_count": 5,
+             "revenue_gross_pln": 1000, "revenue_paid_pln": 0, "avg_order_value_pln": 0,
+             "revenue_gross_original": 0, "original_currency": "PLN"} for i in range(1, 60)]  # nothing for ref
+    o = build_overview(rows, [], [], ref, missing={"sales", "meta", "google"})
+    data = kpi_data(o, {"enabled": True, "periods": ["1"], "metrics": ["revenue", "spend_total"], "per_shop": False})
+    cards = headline_cards(data)
+    assert [c["value"] for c in cards] == ["—", "—"] and not any(c["has_pct"] for c in cards)
+    assert "Brak danych za 22.09" in data["note"]
+
+
+def test_suggestion_key_is_content_based():
+    from src.processing.team_updates import suggestion_key
+
+    assert suggestion_key("os_update", {"task_id": "t1", "suggested_status": "Done"}) == "os_update:t1:Done"
+    assert suggestion_key("not_in_os", {"title": "  Wyłączenie  widoku "}) == "not_in_os:wyłączenie widoku"

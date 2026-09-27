@@ -36,7 +36,7 @@
     <footer class="flex flex-wrap items-center gap-2 border-t border-line bg-canvas/60 px-5 py-3 sm:px-7">
       <button class="btn-secondary" data-run="/api/reports/{{ report.id }}/resend" data-busy="Wysyłam…" data-msg="Wysłano e-mail">{{ icon("send") }} Wyślij e-mailem</button>
       {% if slack_channel %}<button class="btn-secondary" data-run="/api/reports/{{ report.id }}/slack" data-busy="Wysyłam…" data-msg="Wysłano na Slacka" data-reload="1200">{{ icon("hash") }} Wyślij na Slacka</button>{% endif %}
-      <button class="btn-ghost" onclick="navigator.clipboard.writeText(document.querySelector('.prose-report').innerText).then(() => toast('Skopiowano'))">{{ icon("copy") }} Kopiuj tekst</button>
+      <button class="btn-ghost" onclick="navigator.clipboard.writeText([...document.querySelectorAll('.kpi-block, .prose-report')].map((e) => e.innerText).join('\n\n')).then(() => toast('Skopiowano'))">{{ icon("copy") }} Kopiuj tekst</button>
       <a class="btn-ghost ml-auto" href="/studio/{{ report.agent_name }}">{{ icon("sliders-horizontal") }} Dostosuj ten raport</a>
     </footer>
   </article>

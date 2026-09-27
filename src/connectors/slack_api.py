@@ -151,10 +151,15 @@ class SlackAPI:
         if not target.startswith("#"):
             return target
         name = target[1:].lower()
-        for ch in await self.member_channels():
-            if ch["name"].lower() == name:
-                return ch["id"]
-        raise SlackError(f"Bota nie ma na kanale {target} — wpisz tam /invite @nazwa-bota (albo sprawdź nazwę).")
+        try:
+            for ch in await self.member_channels():
+                if ch["name"].lower() == name:
+                    return ch["id"]
+        except SlackError as e:
+            logger.info(f"Slack: channel list unavailable ({e}), posting to {target} by name")
+        # not found among the bot's channels (or no groups:read) — chat.postMessage accepts names too
+        # (public channels with chat:write.public); its errors are explained by _explain
+        return target
 
     async def post(self, target: str, text: str) -> str:
         channel = await self.resolve_target(target)
@@ -167,7 +172,8 @@ class SlackAPI:
         text = text or ""
         for uid in set(re.findall(r"<@([UW][A-Z0-9]+)(?:\|[^>]*)?>", text)):
             name = (await self.user(uid))["name"]
-            text = re.sub(rf"<@{uid}(?:\|[^>]*)?>", f"@{name}", text)
+            # function replacement: a name is data, never a regex template (backslashes, \g<…>)
+            text = re.sub(rf"<@{uid}(?:\|[^>]*)?>", lambda _m, repl=f"@{name}": repl, text)
         text = re.sub(r"<#[CG][A-Z0-9]+\|([^>]*)>", r"#\1", text)
         text = re.sub(r"<!(here|channel|everyone)[^>]*>", r"@\1", text)
         text = re.sub(r"<(https?://[^|>]+)\|([^>]+)>", r"\2 (\1)", text)

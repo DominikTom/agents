@@ -284,17 +284,22 @@ def _team_person(u: dict, full: bool = True) -> dict:
 
 
 async def build_team_updates(ctx: ReportContext) -> dict:
-    from src.processing.team_updates import last_workday, team_overview
+    from src.processing.team_updates import daily_channel_ids, last_workday, team_overview
 
+    if not await daily_channel_ids(ctx.db):
+        raise RuntimeError("Slack: nie wybrano kanałów z raportami dziennymi (panel → Źródła → Slack)")
     if ctx.kind == "weekly":
         days = [week_start(ctx.today) + timedelta(days=i) for i in range((ctx.today - week_start(ctx.today)).days + 1)]
     elif ctx.kind == "wrap":
-        days = [ctx.today]
+        days = [ctx.today if ctx.today.weekday() < 5 else last_workday(ctx.today)]
     else:
         days = [last_workday(ctx.today)]
     per_day = [await team_overview(ctx.db, d) for d in days if d.weekday() < 5]
-    if not any(o["channels_configured"] for o in per_day):
-        raise RuntimeError("Slack: nie wybrano kanałów z raportami dziennymi (panel → Źródła → Slack)")
+    note = {
+        "day_in_progress": "dzień jeszcze trwa — kto nie wysłał raportu, wiadomo dopiero wieczorem",
+        "channels_unreadable": "bot nie ma dostępu do części kanałów — brak raportu nie do sprawdzenia",
+        "sync_unhealthy": "synchronizacja Slacka nie działa — brak raportu nie do sprawdzenia",
+    }
     if ctx.kind == "weekly":
         people: dict[str, dict] = {}
         for o in per_day:
@@ -306,14 +311,21 @@ async def build_team_updates(ctx: ReportContext) -> dict:
             "dni_robocze": [d.isoformat() for d in days if d.weekday() < 5],
             "osoby": list(people.values()),
             "brak_raportu": {o["day"].isoformat(): [m["name"] for m in o["missing"]] for o in per_day if o["missing"]},
+            "uwagi": {o["day"].isoformat(): note[o["missing_status"]] for o in per_day if o["missing_status"] in note},
         }
-    o = per_day[0] if per_day else {"day": days[0], "updates": [], "missing": [], "no_plan": []}
-    return {
+    o = per_day[0] if per_day else {"day": days[0], "updates": [], "missing": [], "no_plan": [],
+                                    "missing_status": "weekend", "not_analyzed": []}
+    out = {
         "dzien": o["day"].isoformat(),
         "raporty": [_team_person(u) for u in o["updates"]],
         "brak_raportu": [m["name"] for m in o["missing"]],
         "brak_planu": o["no_plan"],
     }
+    if o["missing_status"] in note:
+        out["uwaga"] = note[o["missing_status"]]
+    if o.get("not_analyzed"):
+        out["raport_bez_analizy_ai"] = o["not_analyzed"]
+    return out
 
 
 async def build_projects(ctx: ReportContext) -> dict:

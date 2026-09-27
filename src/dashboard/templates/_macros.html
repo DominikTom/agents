@@ -108,6 +108,7 @@
     </div>
   </div>
   {% endfor %}
+  {% if kpi.note %}<p class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">{{ kpi.note }}</p>{% endif %}
   <p class="text-[11px] text-ink-faint">Liczone automatycznie z hurtowni dash (sprzedaż, Meta) i GA4 (Google Ads). Zmiana względem poprzedniego okresu o tej samej długości.</p>
 </section>
 {%- endmacro %}

@@ -22,7 +22,7 @@
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   {% block head %}{% endblock %}
 </head>
-<body class="app-ambient overflow-hidden">
+<body class="app-ambient">
 {# App shell: fixed-height frame; only the content column scrolls (sidebar and background stay put) #}
 <div class="flex h-full">
 
@@ -61,7 +61,8 @@
     </div>
   </aside>
 
-  <div id="scroller" class="flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+  {# relative: absolutely positioned children (sr-only toggles) must scroll with the content, not the root #}
+  <div id="scroller" tabindex="-1" class="relative flex min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain outline-none">
     {# ── Topbar ── #}
     <header class="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface/80 px-4 backdrop-blur-md sm:px-5">
       <button class="btn-ghost -ml-1 p-2 lg:hidden" onclick="toggleSidebar(true)" aria-label="Menu">{{ icon("menu", "h-5 w-5") }}</button>
@@ -83,7 +84,7 @@
       </div>
     </header>
 
-    <main class="with-bottom-nav flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
+    <main class="flex-1 px-4 pt-5 pb-[calc(4.75rem+env(safe-area-inset-bottom))] sm:px-6 lg:px-8 lg:py-7">
       <div class="mx-auto max-w-7xl">
         {% block content %}{% endblock %}
       </div>

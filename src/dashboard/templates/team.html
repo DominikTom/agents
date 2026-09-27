@@ -8,7 +8,7 @@
     <h2 class="page-title">Raporty dnia zespołu</h2>
     <p class="page-subtitle">Dzienne raporty ze Slacka przeczytane przez AI i porównane z zadaniami w MyBed OS. Nic nie zmienia się w OS bez Twojego kliknięcia.</p>
   </div>
-  <div class="flex items-center gap-1.5">
+  <div class="flex flex-wrap items-center gap-1.5">
     <a href="/team?day={{ prev_day.isoformat() }}" class="btn-secondary !px-2 !py-1.5" aria-label="Poprzedni dzień">{{ icon("chevron-left") }}</a>
     <span class="min-w-[9rem] text-center text-sm font-semibold text-ink">{{ day|datepl }}</span>
     {% if next_day %}<a href="/team?day={{ next_day.isoformat() }}" class="btn-secondary !px-2 !py-1.5" aria-label="Następny dzień">{{ icon("chevron-right") }}</a>{% else %}<span class="btn-secondary pointer-events-none !px-2 !py-1.5 opacity-40">{{ icon("chevron-right") }}</span>{% endif %}
@@ -23,6 +23,15 @@
 {% endif %}
 
 {# ── Alerts ── #}
+{% set why = {"day_in_progress": "Dzień jeszcze trwa — „brak raportu” sprawdzimy po 20:00.",
+              "channels_unreadable": "Bot nie ma dostępu do części kanałów z raportami — nie da się sprawdzić, kto nie wysłał raportu. Zajrzyj do Źródła → Slack.",
+              "sync_unhealthy": "Synchronizacja Slacka nie działa albo jest opóźniona — „brak raportu” nie jest teraz wiarygodny."} %}
+{% if o.missing_status in why %}
+<p class="mb-3 flex items-center gap-2 text-xs text-ink-muted">{{ icon("info", "h-3.5 w-3.5 shrink-0") }} {{ why[o.missing_status] }}</p>
+{% endif %}
+{% if o.not_analyzed %}
+<p class="mb-3 flex items-center gap-2 rounded-xl bg-surface-2 px-3 py-2 text-xs text-ink-muted">{{ icon("clock", "h-3.5 w-3.5 shrink-0") }} Raport jest na Slacku, ale AI go jeszcze nie przeanalizowało: {{ o.not_analyzed|join(", ") }}. Kliknij „Przeanalizuj”.</p>
+{% endif %}
 {% if o.missing or o.no_plan %}
 <div class="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
   {% if o.missing %}
@@ -77,7 +86,7 @@
     <div class="space-y-2 border-t border-line bg-canvas/60 px-4 py-3">
       <div class="text-xs font-medium text-ink-muted">Rozjazd z MyBed OS</div>
       {% for x in d.os_updates %}
-      {% set key = "os_update:" ~ loop.index0 %}
+      {% set key = suggestion_key("os_update", x) %}
       <div class="flex items-start gap-2 text-[13px]">
         <span class="mt-0.5 text-ink-faint">{{ icon("folder-kanban", "h-3.5 w-3.5") }}</span>
         <div class="min-w-0 flex-1">
@@ -85,19 +94,19 @@
           <span class="whitespace-nowrap font-mono text-[11px] text-ink-muted">{{ x.current_status }} → <span class="text-primary-ink">{{ x.suggested_status }}</span></span>
           {% if x.note %}<div class="text-xs text-ink-muted">{{ x.note }}</div>{% endif %}
         </div>
-        {% if key in (d.pushed or []) %}<span class="badge bg-emerald-50 text-emerald-700">w OS</span>
-        {% elif can_suggest %}<button class="btn-ghost !px-2 !py-1 text-xs" onclick="suggest(this, '{{ day.isoformat() }}', '{{ u.person_key }}', 'os_update', {{ loop.index0 }})">Do OS</button>{% endif %}
+        {% if key in (d.pushed_keys or []) %}<span class="badge bg-emerald-50 text-emerald-700">w OS</span>
+        {% elif can_suggest %}<button class="btn-ghost !px-2 !py-1 text-xs" data-day="{{ day.isoformat() }}" data-person="{{ u.person_key }}" data-kind="os_update" data-key="{{ key }}" onclick="suggest(this)">Do OS</button>{% endif %}
       </div>
       {% endfor %}
       {% for x in d.not_in_os %}
-      {% set key = "not_in_os:" ~ loop.index0 %}
+      {% set key = suggestion_key("not_in_os", x) %}
       <div class="flex items-start gap-2 text-[13px]">
         <span class="mt-0.5 text-amber-600">{{ icon("plus", "h-3.5 w-3.5") }}</span>
         <div class="min-w-0 flex-1">
           <span class="font-medium text-ink">{{ x.title }}</span> <span class="text-xs text-ink-muted">— nie ma w OS{% if x.project %} · {{ x.project }}{% endif %}</span>
         </div>
-        {% if key in (d.pushed or []) %}<span class="badge bg-emerald-50 text-emerald-700">w OS</span>
-        {% elif can_suggest %}<button class="btn-ghost !px-2 !py-1 text-xs" onclick="suggest(this, '{{ day.isoformat() }}', '{{ u.person_key }}', 'not_in_os', {{ loop.index0 }})">Do OS</button>{% endif %}
+        {% if key in (d.pushed_keys or []) %}<span class="badge bg-emerald-50 text-emerald-700">w OS</span>
+        {% elif can_suggest %}<button class="btn-ghost !px-2 !py-1 text-xs" data-day="{{ day.isoformat() }}" data-person="{{ u.person_key }}" data-kind="not_in_os" data-key="{{ key }}" onclick="suggest(this)">Do OS</button>{% endif %}
       </div>
       {% endfor %}
       {% if not can_suggest %}<p class="text-[11px] text-ink-faint">Wysyłanie propozycji do OS włączysz w Studio → O mnie i ustawienia („Propozycje AI”).</p>{% endif %}
@@ -115,9 +124,10 @@
 
 {% block scripts %}
 <script>
-async function suggest(btn, day, person, kind, index) {
+async function suggest(btn) {
   const fd = new FormData()
-  fd.append('day', day); fd.append('person_key', person); fd.append('kind', kind); fd.append('index', index)
+  fd.append('day', btn.dataset.day); fd.append('person_key', btn.dataset.person)
+  fd.append('kind', btn.dataset.kind); fd.append('key', btn.dataset.key)
   busy(btn, true, '…')
   try { await post('/api/team/suggest', fd); btn.outerHTML = '<span class="badge bg-emerald-50 text-emerald-700">w OS</span>'; toast('Wysłano do OS jako propozycję', 'success') }
   catch (e) { toast(e.message, 'error'); busy(btn, false) }

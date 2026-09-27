@@ -243,6 +243,7 @@
       <div class="panel-head"><h3 class="section-title">Podgląd</h3><a id="preview-link" class="btn-ghost !px-2 !py-1 text-xs" href="#">Otwórz {{ icon("external-link", "h-3.5 w-3.5") }}</a></div>
       <div class="max-h-[70vh] overflow-y-auto p-5">
         <p id="preview-lead" class="mb-4 rounded-xl bg-primary-soft px-3 py-2.5 text-sm text-ink"></p>
+        <div id="preview-kpi" class="mb-6 hidden border-b border-line pb-6"></div>
         <div id="preview-body" class="prose-report"></div>
       </div>
     </section>
@@ -278,7 +279,11 @@ async function preview() {
     const res = await post('/api/studio/{{ key }}/preview', new FormData(document.getElementById('studio-form')))
     document.getElementById('preview-box').classList.remove('hidden')
     document.getElementById('preview-lead').textContent = res.lead || ''
+    const kpiBox = document.getElementById('preview-kpi')
+    kpiBox.innerHTML = res.kpi_html || ''
+    kpiBox.classList.toggle('hidden', !res.kpi_html)
     document.getElementById('preview-body').innerHTML = res.html
+    wrapReportTables(document.getElementById('preview-box'))
     document.getElementById('preview-link').href = '/reports/' + res.id
     document.getElementById('preview-box').scrollIntoView({ behavior: 'smooth', block: 'start' })
     if (Object.keys(res.errors || {}).length) toast('Część źródeł była niedostępna: ' + Object.keys(res.errors).join(', '), 'error')

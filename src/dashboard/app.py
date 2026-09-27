@@ -101,9 +101,10 @@ templates.env.filters.update({
 
 
 def _kpi_helpers():
+    from src.processing.team_updates import suggestion_key
     from src.reports.kpi import headline_cards, tables
 
-    return {"kpi_cards": headline_cards, "kpi_tables": tables}
+    return {"kpi_cards": headline_cards, "kpi_tables": tables, "suggestion_key": suggestion_key}
 
 
 templates.env.globals.update(_kpi_helpers())
@@ -386,8 +387,10 @@ async def studio_preview(request: Request, key: str):
         result = await ReportEngine(db).run(key, deliver=False, preview=True, profile_override=profile)
     except Exception as e:
         return JSONResponse({"error": str(e)[:300]}, status_code=500)
+    # the KPI block is rendered from data (outside the AI prose), like on the report page
+    kpi_html = str(templates.env.get_template("_macros.html").module.kpi_block(result["kpi"])) if result.get("kpi") else ""
     return {"id": result["id"], "title": result["title"], "lead": result["lead"], "html": result["html"],
-            "errors": result["errors"]}
+            "kpi_html": kpi_html, "errors": result["errors"]}
 
 
 # ─── Chats ───────────────────────────────────────────────────────────────────
@@ -784,11 +787,15 @@ async def team_analyze(request: Request, day: str = Form(...)):
 
 @app.post("/api/team/suggest")
 async def team_suggest(request: Request, day: str = Form(...), person_key: str = Form(...),
-                       kind: str = Form(...), index: int = Form(...)):
-    """CEO-approved: send one suggestion from a daily report to MyBed OS as an AI proposal."""
+                       kind: str = Form(...), key: str = Form(...)):
+    """CEO-approved: send one suggestion from a daily report to MyBed OS as an AI proposal.
+
+    The item is addressed by its content key (not list position), so a re-analysis in between can never
+    make the click send a different item."""
     if not authed(request):
         return unauthorized()
     from src.connectors.os_mybed import OSClient
+    from src.processing.team_updates import suggestion_key
     from src.reports.profiles import load_general
 
     db = get_db_sync()
@@ -804,10 +811,15 @@ async def team_suggest(request: Request, day: str = Form(...), person_key: str =
         return JSONResponse({"error": "not found"}, status_code=404)
     u = rows[0]
     payload = u["data"] or {}
-    items = payload.get("os_updates" if kind == "os_update" else "not_in_os") or []
-    if kind not in ("os_update", "not_in_os") or not 0 <= index < len(items):
+    if kind not in ("os_update", "not_in_os"):
         return JSONResponse({"error": "bad item"}, status_code=400)
-    item = items[index]
+    items = payload.get("os_updates" if kind == "os_update" else "not_in_os") or []
+    item = next((x for x in items if suggestion_key(kind, x) == key), None)
+    if item is None:
+        return JSONResponse({"error": "Raport został w międzyczasie przeanalizowany ponownie — odśwież stronę"},
+                            status_code=409)
+    if key in (payload.get("pushed_keys") or []):
+        return {"status": "already", "ref": None}
     who = u.get("person_name") or ""
     if kind == "os_update":
         title = f"{who}: „{item.get('title')}” → {item.get('suggested_status')}"
@@ -824,9 +836,7 @@ async def team_suggest(request: Request, day: str = Form(...), person_key: str =
         ref = await client.create_suggestion(title, desc + "\nDodane z panelu MyBed Agents.", f"Raport dnia: {who}", "slack")
     except Exception as e:
         return JSONResponse({"error": str(e)[:300]}, status_code=502)
-    pushed = set(payload.get("pushed") or [])
-    pushed.add(f"{kind}:{index}")
-    payload["pushed"] = sorted(pushed)
+    payload["pushed_keys"] = sorted(set(payload.get("pushed_keys") or []) | {key})
     await db.set_team_update_data(d, person_key, payload)
     return {"status": "created", "ref": ref}
 
@@ -867,8 +877,9 @@ async def people_page(request: Request):
         e["aliases_by_source"] = by_source
     unmapped = await db.get_unmapped_whatsapp_senders()
     unmapped_slack = await db.get_unmapped_slack_authors()
+    slack_names = {r["user_id"]: r["user_name"] for r in await db.get_slack_user_names()}
     return render(request, "people.html", "people", entities=entity_map, unmapped=unmapped[:60],
-                  unmapped_slack=unmapped_slack[:40])
+                  unmapped_slack=unmapped_slack[:40], slack_names=slack_names)
 
 
 @app.post("/api/entity/alias")

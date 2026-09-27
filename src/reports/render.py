@@ -13,7 +13,8 @@ _ALLOWED_HREF = re.compile(r"^(https?:|mailto:)", re.I)
 def to_html(text: str) -> str:
     """Render report markdown safely: raw HTML from the model is escaped, only http(s)/mailto links survive."""
     safe = html.escape(text or "", quote=False)
-    out = md.markdown(safe, extensions=["extra", "sane_lists", "nl2br"], output_format="html")
+    # No "extra": it includes attr_list / md_in_html, which let text like `{: onclick=… }` add attributes
+    out = md.markdown(safe, extensions=["tables", "fenced_code", "sane_lists", "nl2br"], output_format="html")
 
     def fix_link(m: re.Match) -> str:
         href = html.unescape(m.group(1))
@@ -37,11 +38,15 @@ def _mark_numeric_columns(content: str) -> str:
             idx = -1
 
             def cell(c: re.Match) -> str:
+                # every cell counts (also ones with attributes); marking twice is a no-op
                 nonlocal idx
                 idx += 1
-                return f'<{c.group(1)} class="num">' if idx in cols else c.group(0)
+                attrs = c.group(2) or ""
+                if idx not in cols or 'class="num"' in attrs:
+                    return c.group(0)
+                return f'<{c.group(1)} class="num"{attrs}>'
 
-            return re.sub(r"<(td|th)>", cell, r.group(0))
+            return re.sub(r"<(td|th)(\s[^>]*)?>", cell, r.group(0))
 
         return re.sub(r"<tr>.*?</tr>", row, t, flags=re.S)
 
@@ -89,7 +94,12 @@ _INLINE = [
 ]
 
 # A table cell is "numeric" when it is a number, amount or percentage (optionally bold / with a trailing note)
-_NUMERIC_CELL = re.compile(r"^[−+\-±~]?\s*[\d\u00a0 .,]+\s*(?:zł|%|EUR|€|PLN|h|szt\.?|zam\.?)?(?:\s*\(.*\))?\s*$", re.I)
+# e.g. "209 049 zł", "−19,4%", "93 894,55 zł (21 541,47 EUR)", "52 (+3%)" — but not "2 (rabat dla hotelu…)"
+_NUMERIC_CELL = re.compile(
+    r"^[−+\-±~]?\s*[\d\u00a0 .,]+\s*(?:zł|%|EUR|€|PLN|h|szt\.?|zam\.?)?"
+    r"(?:\s*\([−+\-±~]?\s*[\d\u00a0 .,]+\s*(?:zł|%|EUR|€|PLN)?\))?\s*$",
+    re.I,
+)
 
 
 def _is_numeric(inner: str) -> bool:
@@ -128,8 +138,9 @@ def _style_table(table: str) -> str:
                 style = (f"text-align:{align};padding:6px 8px;border-bottom:1px solid {LINE};color:{MUTED};"
                          "font-size:12px;font-weight:600;")
             else:
+                short = len(re.sub(r"<[^>]+>", "", inner).strip()) <= 16  # long cells may wrap on phones
                 style = (f"text-align:{align};padding:6px 8px;border-bottom:1px solid {LINE};color:{SOFT};"
-                         + (NUM + "white-space:nowrap;" if num else ""))
+                         + (NUM + ("white-space:nowrap;" if short else "") if num else ""))
             return f'<{tag} style="{style}">{inner}</{tag}>'
 
         return "<tr>" + re.sub(r"<(td|th)(?: [^>]*)?>(.*?)</\1>", cell, m.group(1), flags=re.S) + "</tr>"

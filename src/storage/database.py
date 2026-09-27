@@ -889,10 +889,18 @@ class Database:
             "ORDER BY message_count DESC"
         )
 
-    async def get_unmapped_slack_authors(self) -> list[dict]:
+    async def get_slack_user_names(self) -> list[dict]:
         return await self._fetchall(
-            "SELECT metadata->>'user_name' AS sender_name, COUNT(*) AS message_count, MAX(timestamp) AS last_seen "
-            "FROM events WHERE source = 'slack' AND sender_entity_id IS NULL AND metadata->>'user_name' IS NOT NULL "
+            "SELECT metadata->>'user_id' AS user_id, MAX(metadata->>'user_name') AS user_name FROM events "
+            "WHERE source = 'slack' AND metadata->>'user_id' IS NOT NULL GROUP BY 1"
+        )
+
+    async def get_unmapped_slack_authors(self) -> list[dict]:
+        """Unlinked Slack authors, keyed by their (immutable) user id; the name is for display."""
+        return await self._fetchall(
+            "SELECT metadata->>'user_id' AS alias_key, MAX(metadata->>'user_name') AS sender_name, "
+            "COUNT(*) AS message_count, MAX(timestamp) AS last_seen "
+            "FROM events WHERE source = 'slack' AND sender_entity_id IS NULL AND metadata->>'user_id' IS NOT NULL "
             "GROUP BY 1 ORDER BY message_count DESC"
         )
 
@@ -985,15 +993,15 @@ class Database:
                 entity_id, alias_name,
             )
         elif source == "slack":
+            # alias is the Slack user id (Ludzie → nierozpoznani autorzy) or, typed by hand, a full name
             await self._execute(
                 "UPDATE events SET sender_entity_id = $1 "
-                "WHERE source = 'slack' AND sender_entity_id IS NULL "
-                "AND lower(metadata->>'user_name') = lower($2)",
+                "WHERE source = 'slack' AND (metadata->>'user_id' = $2 OR lower(metadata->>'user_name') = lower($2))",
                 entity_id, alias_name,
             )
             await self._execute(
                 "UPDATE team_updates SET entity_id = $1, fingerprint = NULL "
-                "WHERE entity_id IS NULL AND lower(person_name) = lower($2)",
+                "WHERE person_key = $2 OR lower(person_name) = lower($2)",
                 entity_id, alias_name,
             )
         elif source == "asana":
@@ -1340,6 +1348,56 @@ class Database:
         )
         return {r["ch"]: r["ts"] for r in rows if r["ch"]}
 
+    async def upsert_slack_event(self, source_id: str, timestamp: datetime, title: str, body: str,
+                                 sender_entity_id: int | None, category: str, content_hash: str,
+                                 metadata: dict) -> str | None:
+        """Insert a Slack message, or update it when its text changed (edits). Returns 'inserted',
+        'updated' or None (unchanged). A stored author link is kept when this run could not resolve one."""
+        row = await self._fetchone(
+            "INSERT INTO events (source, source_id, event_type, timestamp, title, body, sender_entity_id, "
+            "category, content_hash, metadata) VALUES ('slack', $1, 'message', $2, $3, $4, $5, $6, $7, $8::jsonb) "
+            "ON CONFLICT (source, source_id) DO UPDATE SET body = EXCLUDED.body, content_hash = EXCLUDED.content_hash, "
+            "title = EXCLUDED.title, "
+            "metadata = events.metadata || EXCLUDED.metadata "
+            "  || CASE WHEN EXCLUDED.metadata->>'user_name' = EXCLUDED.metadata->>'user_id' "
+            "          THEN jsonb_build_object('user_name', events.metadata->>'user_name') ELSE '{}'::jsonb END, "
+            "sender_entity_id = COALESCE(EXCLUDED.sender_entity_id, events.sender_entity_id) "
+            "WHERE events.content_hash IS DISTINCT FROM EXCLUDED.content_hash "
+            "   OR (events.sender_entity_id IS NULL AND EXCLUDED.sender_entity_id IS NOT NULL) "
+            "RETURNING (xmax = 0) AS inserted",
+            source_id, timestamp, title, body, sender_entity_id, category, content_hash,
+            json.dumps(metadata, default=str),
+        )
+        if row is None:
+            return None
+        return "inserted" if row["inserted"] else "updated"
+
+    async def get_slack_thread_last_reply(self, channel_id: str) -> dict[str, float]:
+        rows = await self._fetchall(
+            "SELECT metadata->>'thread_ts' AS t, MAX((metadata->>'ts')::numeric)::float AS last FROM events "
+            "WHERE source = 'slack' AND metadata->>'channel_id' = $1 AND (metadata->>'is_reply')::boolean GROUP BY 1",
+            channel_id,
+        )
+        return {r["t"]: r["last"] for r in rows if r["t"]}
+
+    async def resolve_entity_strict(self, source: str, name: str) -> int | None:
+        """Alias for the source, then an exact full-name match — no first-name guessing."""
+        name = (name or "").strip()
+        if not name:
+            return None
+        row = await self._fetchone(
+            "SELECT entity_id FROM entity_aliases WHERE source = $1 AND lower(alias_name) = lower($2) LIMIT 1",
+            source, name,
+        )
+        if row:
+            return row["entity_id"]
+        rows = await self._fetchall(
+            "SELECT id FROM entities WHERE entity_type = 'person' AND "
+            "(lower(display_name) = lower($1) OR lower(canonical_name) = lower($1)) LIMIT 2",
+            name,
+        )
+        return rows[0]["id"] if len(rows) == 1 else None
+
     async def get_slack_messages(self, start: datetime, end: datetime, channel_ids: list[str] | None = None) -> list[dict]:
         rows = await self._fetchall(
             "SELECT id, timestamp, body, sender_entity_id, metadata FROM events "
@@ -1352,16 +1410,18 @@ class Database:
             r["metadata"] = _j(r.get("metadata"), {})
         return rows
 
-    async def get_slack_reporters(self, since: datetime, channel_ids: list[str]) -> list[dict]:
-        """People who post in daily channels: user id, name, number of report days."""
+    async def get_slack_reporters(self, since: datetime, channel_ids: list[str],
+                                  until: datetime | None = None) -> list[dict]:
+        """People who post in daily channels between since and until: user id, name, number of report days."""
         if not channel_ids:
             return []
         return await self._fetchall(
             "SELECT metadata->>'user_id' AS user_id, MAX(metadata->>'user_name') AS user_name, "
             "COUNT(DISTINCT (timestamp AT TIME ZONE 'Europe/Warsaw')::date) AS days, MAX(timestamp) AS last_at "
-            "FROM events WHERE source = 'slack' AND timestamp >= $1 AND metadata->>'channel_id' = ANY($2::text[]) "
+            "FROM events WHERE source = 'slack' AND timestamp >= $1 AND ($3::timestamptz IS NULL OR timestamp < $3) "
+            "AND metadata->>'channel_id' = ANY($2::text[]) "
             "AND NOT COALESCE((metadata->>'is_reply')::boolean, false) GROUP BY 1",
-            since, channel_ids,
+            since, channel_ids, until,
         )
 
     async def get_entity(self, entity_id: int) -> dict | None:

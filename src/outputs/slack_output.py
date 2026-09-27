@@ -14,8 +14,11 @@ def _chunks(text: str, size: int = 3800) -> list[str]:
     carry_fence = False
     while text:
         if carry_fence:
-            text = "```\n" + text
+            # the previous chunk was closed; reopen — unless the rest starts with that block's own closing fence
+            text = text[3:].lstrip("\n") if text.startswith("```") else "```\n" + text
             carry_fence = False
+            if not text:
+                break
         if len(text) <= size:
             out.append(text)
             break
@@ -23,7 +26,9 @@ def _chunks(text: str, size: int = 3800) -> list[str]:
         cut = window.rfind("\n\n")
         if cut < size // 2:
             cut = window.rfind("\n")
-        cut = cut if cut > 0 else size
+        # always make progress: a cut that would leave only the (re)opened fence becomes a hard cut
+        if cut <= 0 or not text[:cut].replace("```", "").strip():
+            cut = size
         chunk = text[:cut]
         if chunk.count("```") % 2 == 1:
             chunk += "\n```"

@@ -88,7 +88,16 @@ class DashClient:
             [] if isinstance(google, Exception) else google,
             rev,
         )
-        return build_overview(rev, ads, [] if isinstance(rooms, Exception) else rooms, ref)
+        # A source with nothing for `ref` is late (ETL not run yet) or failed — show "no data", never "0 zł, −100%"
+        ref_iso = ref.isoformat()
+        missing = set()
+        if not any(r.get("date") == ref_iso for r in rev):
+            missing.add("sales")
+        if isinstance(meta, Exception) or not any(a.get("date") == ref_iso for a in meta):
+            missing.add("meta")
+        if isinstance(google, Exception) or not any(g.get("date") == ref_iso and _f(g.get("ad_cost")) for g in google):
+            missing.add("google")
+        return build_overview(rev, ads, [] if isinstance(rooms, Exception) else rooms, ref, missing=missing)
 
 
 def _f(v) -> float:
@@ -133,7 +142,18 @@ def normalize_spend(meta: list[dict], google: list[dict], revenue: list[dict]) -
     return out
 
 
-def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref: date) -> dict:
+MISSING_LABELS = {"sales": "sprzedaż", "meta": "Meta", "google": "Google Ads (GA4)"}
+MISSING_METRICS = {
+    "sales": {"revenue", "orders", "aov"},
+    "meta": {"spend_meta", "spend_total"},
+    "google": {"spend_google", "spend_total"},
+}
+
+
+def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref: date,
+                   missing: set[str] | None = None) -> dict:
+    missing = set(missing or ())
+    unknown = set().union(*(MISSING_METRICS[m] for m in missing)) if missing else set()
     by_day_shop: dict[tuple[str, str], dict] = {}
     for r in revenue:
         by_day_shop[(r["date"], r["source_shop"])] = r
@@ -258,7 +278,9 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
         for shop in [None] + MAIN_SHOPS:
             c, p = period_values(shop, cur_from, ref), period_values(shop, prev_from, prev_to)
             rows.append({"shop": shop or "Razem", **{
-                k: {"v": c[k], "prev": p[k], "pct": _pct(c[k] or 0, p[k] or 0)} for k in c
+                k: ({"v": None, "prev": p[k], "pct": None} if k in unknown else
+                    {"v": c[k], "prev": p[k], "pct": _pct(c[k], p[k]) if c[k] is not None and p[k] is not None else None})
+                for k in c
             }})
         periods[str(n)] = {"from": cur_from.isoformat(), "to": ref.isoformat(),
                            "prev_from": prev_from.isoformat(), "prev_to": prev_to.isoformat(), "rows": rows}
@@ -298,6 +320,7 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
             "spend_day": round(spend_y, 2),
             "spend_7d": spend7,
             "spend_7d_vs_prev_pct": _pct(spend7, spend_prev7),
+            "brak_danych": [MISSING_LABELS[m] for m in sorted(missing) if m != "sales"],
             "per_sklep": by_shop,
             "per_platforma": by_platform,
             "zrodla": "Meta: konta reklamowe per sklep (dash). Google Ads: koszt z GA4 per domena, mybed.de przeliczone z EUR na PLN.",
@@ -309,4 +332,7 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
         ],
         "series": series,
         "periods": periods,
+        "missing": sorted(missing),
+        "missing_note": (f"Brak danych za {ref.strftime('%d.%m')}: " + ", ".join(MISSING_LABELS[m] for m in sorted(missing))
+                         + " (hurtownia jeszcze się nie odświeżyła albo źródło nie odpowiedziało)") if missing else "",
     }

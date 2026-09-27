@@ -43,12 +43,12 @@
   {% set g = hmap.gmail %}
   {{ source_card("Gmail", "mail", g.state if config.google else "off",
       [("Ostatni mail", g.last_event|ago if g.last_event else "—"), ("Maile / 24h", g.last_24h), ("Sync", (g.run.ran_at|ago) if g.run else "—")],
-      action="/api/jobs/gmail_sync/run", hint=(g.run.error_message if g.run and g.run.status == "error" else None)) }}
+      action="/api/jobs/gmail_sync/run", hint=(g.run.error_message|e if g.run and g.run.status == "error" else None)) }}
 
   {% set c = hmap.calendar %}
   {{ source_card("Kalendarz Google", "calendar", c.state if config.google else "off",
       [("Wydarzeń w bazie", c.total), ("Sync", (c.run.ran_at|ago) if c.run else "—")],
-      action="/api/jobs/calendar_sync/run", hint=(c.run.error_message if c.run and c.run.status == "error" else None)) }}
+      action="/api/jobs/calendar_sync/run", hint=(c.run.error_message|e if c.run and c.run.status == "error" else None)) }}
 
   {{ source_card("MyBed Group OS", "folder-kanban", "ok" if os_counts else ("error" if config.os else "off"),
       ([("Twoje otwarte zadania", os_counts.my_open), ("Zaległe w zespole", os_counts.team_overdue), ("Aktywne blokery", os_counts.blockers)] if os_counts else [("Supabase", "mybed-group-os")]),
@@ -73,6 +73,6 @@
   {{ source_card("Slack", "hash", (sl.state if sl.state != "empty" else "stale") if config.slack else "off",
       [("Ostatnia wiadomość", sl.last_event|ago if sl.last_event else "—"), ("Wiadomości / 24h", sl.last_24h), ("Sync", (sl.run.ran_at|ago) if sl.run else "—")],
       href="/sources/slack", action_label="Kanały i raporty dnia",
-      hint=(sl.run.error_message if sl.run and sl.run.status == "error" else (None if config.slack else "Dodaj <span class='font-mono'>SLACK_BOT_TOKEN</span> do .env — bot czyta dzienne raporty zespołu i wysyła raporty."))) }}
+      hint=(sl.run.error_message|e if sl.run and sl.run.status == "error" else (None if config.slack else "Dodaj <span class='font-mono'>SLACK_BOT_TOKEN</span> do .env — bot czyta dzienne raporty zespołu i wysyła raporty."))) }}
 </div>
 {% endblock %}

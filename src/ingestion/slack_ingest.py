@@ -8,6 +8,7 @@ and treated as team daily reports; everything else is off until switched on in t
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import logging
 import time
@@ -19,9 +20,9 @@ from src.storage.database import Database
 logger = logging.getLogger(__name__)
 
 FIRST_RUN_DAYS = 7          # history loaded the first time a channel is read
-RECHECK_DAYS = 2            # threads and edits re-read on every run
-SKIP_SUBTYPES = {"channel_join", "channel_leave", "channel_topic", "channel_purpose", "channel_name",
-                 "bot_message", "bot_add", "bot_remove", "pinned_item", "unpinned_item"}
+RECHECK_DAYS = 4            # edits and new thread replies re-checked on every run (covers a weekend)
+# Only real user messages; everything else (joins, tombstones of deleted posts, bots…) is skipped
+KEEP_SUBTYPES = {None, "thread_broadcast", "file_share", "me_message"}
 
 
 async def load_channel_settings(db: Database) -> dict:
@@ -31,7 +32,7 @@ async def load_channel_settings(db: Database) -> dict:
 async def refresh_channels(db: Database, api: SlackAPI) -> dict:
     """Merge the bot's current channels into the stored settings (defaults for new ones)."""
     stored = await db.get_setting("slack", {}) or {}
-    channels = dict(stored.get("channels") or {})
+    channels = copy.deepcopy(stored.get("channels") or {})  # deep: the comparison below must see changes
     member = await api.member_channels()
     member_ids = set()
     for ch in member:
@@ -85,38 +86,55 @@ class SlackIngestor:
 
     async def _sync_channel(self, cid: str, cfg: dict, oldest: str, now: float) -> int:
         new = 0
+        seen_replies = await self.db.get_slack_thread_last_reply(cid)
         for msg in await self.api.history(cid, oldest):
-            if await self._store(cid, cfg, msg):
-                new += 1
+            new += await self._safe_store(cid, cfg, msg)
             latest_reply = float(msg.get("latest_reply") or 0)
-            if msg.get("reply_count") and latest_reply > now - RECHECK_DAYS * 86400:
+            # fetch a thread only when it has replies we have not stored yet
+            if msg.get("reply_count") and latest_reply > seen_replies.get(msg["ts"], 0.0):
                 for reply in await self.api.replies(cid, msg["ts"]):
-                    if await self._store(cid, cfg, reply, thread_ts=msg["ts"]):
-                        new += 1
+                    new += await self._safe_store(cid, cfg, reply, thread_ts=msg["ts"])
         return new
 
-    async def _store(self, cid: str, cfg: dict, msg: dict, thread_ts: str | None = None) -> bool:
-        if msg.get("subtype") in SKIP_SUBTYPES or msg.get("bot_id") or not msg.get("user"):
-            return False
-        if msg.get("user") == self.bot_user_id:
-            return False
+    async def _safe_store(self, cid: str, cfg: dict, msg: dict, thread_ts: str | None = None) -> int:
+        """One malformed message must not stop the channel (or the channels after it)."""
+        try:
+            return 1 if await self._store(cid, cfg, msg, thread_ts) == "inserted" else 0
+        except SlackError:
+            raise
+        except Exception as e:
+            logger.warning(f"Slack #{cfg.get('name')}: skipped message {msg.get('ts')}: {e}")
+            return 0
+
+    async def _resolve_author(self, user: dict) -> int | None:
+        """E-mail (with users:read.email) → alias by Slack user id (Ludzie) → exact full name. No first-name guesses."""
+        if user.get("email"):
+            eid = await self.db.resolve_entity_strict("gmail", user["email"])
+            if eid:
+                return eid
+        eid = await self.db.resolve_entity_strict("slack", user["id"])
+        if eid:
+            return eid
+        if user.get("name") and user["name"] != user["id"]:
+            return await self.db.resolve_entity_strict("slack", user["name"])
+        return None
+
+    async def _store(self, cid: str, cfg: dict, msg: dict, thread_ts: str | None = None) -> str | None:
+        if msg.get("subtype") not in KEEP_SUBTYPES or msg.get("hidden") or msg.get("bot_id") or not msg.get("user"):
+            return None
+        if msg.get("user") in (self.bot_user_id, "USLACKBOT"):
+            return None
         text = await self.api.clean_text(msg.get("text") or "")
         files = [f.get("name") or f.get("title") or "plik" for f in msg.get("files") or []]
         if files:
             text = (text + "\n" if text else "") + "\n".join(f"[plik: {f}]" for f in files)
         if not text.strip():
-            return False
+            return None
         user = await self.api.user(msg["user"])
-        entity_id = None
-        if user.get("email"):
-            entity_id = await self.db.resolve_entity("gmail", user["email"])
-        if entity_id is None:
-            entity_id = await self.db.resolve_entity("slack", user["name"])
+        entity_id = await self._resolve_author(user)
         ts = msg["ts"]
-        event_id = await self.db.store_event(
-            source="slack",
+        return await self.db.upsert_slack_event(
             source_id=f"{cid}:{ts}",
-            event_type="message",
             timestamp=datetime.fromtimestamp(float(ts), tz=timezone.utc),
             title=f"#{cfg.get('name', cid)}",
             body=text,
@@ -136,4 +154,3 @@ class SlackIngestor:
                 "edited": bool(msg.get("edited")),
             },
         )
-        return event_id is not None

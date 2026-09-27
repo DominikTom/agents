@@ -249,6 +249,12 @@
   #root {
     height: 100%;
   }
+  /* The app shell scrolls inside #scroller; the root must never scroll (not even by focus/script) */
+  html:has(body.app-ambient),
+  body.app-ambient {
+    overflow: hidden;
+    overflow: clip;
+  }
   /* Dynamic viewport height on mobile (address bar), falls back to 100% above */
   @supports (height: 100dvh) {
     html,
@@ -303,12 +309,6 @@
   }
   .pb-safe {
     padding-bottom: env(safe-area-inset-bottom);
-  }
-  /* Miejsce na dolną nawigację mobile — main dostaje ten padding poniżej lg */
-  @media (max-width: 1023px) {
-    .with-bottom-nav {
-      padding-bottom: calc(3.75rem + env(safe-area-inset-bottom));
-    }
   }
 
   /* Ambientowe tło aplikacji po zalogowaniu — echo poświat z ekranu logowania
@@ -480,6 +480,13 @@
   }
   .prose-report table {
     @apply w-full text-[13px] mb-4 border-collapse;
+  }
+  /* app.js wraps report tables so wide ones scroll sideways on phones instead of being clipped */
+  .prose-report .table-scroll {
+    @apply -mx-1 mb-4 overflow-x-auto px-1;
+  }
+  .prose-report .table-scroll table {
+    @apply mb-0;
   }
   .prose-report th {
     @apply text-left font-medium text-ink-muted border-b border-line px-2 py-1.5;

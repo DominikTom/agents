@@ -93,7 +93,13 @@ async def team_updates(db: Database | None = None, day=None, force: bool = False
             return await tu.run(day, force=force)
         prev = await tu.run(last_workday(today()), force=force)
         cur = await tu.run(today(), force=force)
-        return {"today": cur, "previous_workday": prev, **({"skipped": cur["skipped"]} if "skipped" in cur else {})}
+        out = {"today": cur, "previous_workday": prev}
+        if "skipped" in cur:
+            out["skipped"] = cur["skipped"]
+        errors = [r["error"] for r in (prev, cur) if r.get("error")]
+        if errors:
+            out["error"] = "; ".join(errors)
+        return out
 
     return await _logged(db, "team_updates", both())
 

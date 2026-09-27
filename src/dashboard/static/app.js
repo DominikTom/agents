@@ -106,3 +106,33 @@ document.addEventListener('click', async (e) => {
 })
 
 // Relative "x min temu" refresh is server-rendered; nothing to do client-side.
+
+
+// ── App shell: #scroller is the only scrolling element ──────────────────────
+;(function () {
+  const scroller = document.getElementById('scroller')
+  if (!scroller) return
+  const key = 'scroll:' + location.pathname + location.search
+  // Keyboard scrolling (PageDown/Space/arrows) works right away
+  if (document.activeElement === document.body) scroller.focus({ preventScroll: true })
+  // Browsers restore only the root scroll position — keep ours across reloads / Back
+  try {
+    const y = sessionStorage.getItem(key)
+    if (y !== null) { scroller.scrollTop = Number(y); sessionStorage.removeItem(key) }
+  } catch (e) {}
+  window.addEventListener('pagehide', () => {
+    try { sessionStorage.setItem(key, String(scroller.scrollTop)) } catch (e) {}
+  })
+})()
+
+// Wide report tables scroll sideways on phones (also in the Studio preview, rendered later)
+function wrapReportTables(root) {
+  (root || document).querySelectorAll('.prose-report table').forEach((t) => {
+    if (t.parentElement && t.parentElement.classList.contains('table-scroll')) return
+    const w = document.createElement('div')
+    w.className = 'table-scroll'
+    t.parentNode.insertBefore(w, t)
+    w.appendChild(t)
+  })
+}
+wrapReportTables()
