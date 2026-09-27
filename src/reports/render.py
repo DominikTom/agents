@@ -21,7 +21,31 @@ def to_html(text: str) -> str:
             return "<a>"
         return f'<a href="{html.escape(href)}" target="_blank" rel="noopener">'
 
-    return re.sub(r'<a href="([^"]*)"[^>]*>', fix_link, out)
+    out = re.sub(r'<a href="([^"]*)"[^>]*>', fix_link, out)
+    return _mark_numeric_columns(out)
+
+
+def _mark_numeric_columns(content: str) -> str:
+    """class="num" on cells of numeric table columns — the panel right-aligns them (e-mail restyles inline)."""
+    def table(m: re.Match) -> str:
+        t = m.group(0)
+        cols = _numeric_columns(t)
+        if not cols:
+            return t
+
+        def row(r: re.Match) -> str:
+            idx = -1
+
+            def cell(c: re.Match) -> str:
+                nonlocal idx
+                idx += 1
+                return f'<{c.group(1)} class="num">' if idx in cols else c.group(0)
+
+            return re.sub(r"<(td|th)>", cell, r.group(0))
+
+        return re.sub(r"<tr>.*?</tr>", row, t, flags=re.S)
+
+    return re.sub(r"<table>.*?</table>", table, content, flags=re.S)
 
 
 def split_lead(text: str) -> tuple[str, str]:
@@ -45,27 +69,81 @@ MUTED = "#4B5563"
 FAINT = "#9CA3AF"
 LINE = "#E5E7EB"
 PRIMARY = "#4F46E5"
+PRIMARY_SOFT = "#EEF2FF"
+PRIMARY_INK = "#3730A3"
 CANVAS = "#F1F5F9"
+NUM = "font-variant-numeric:tabular-nums;"
 
 _INLINE = [
     (r"<h1>", f'<h1 style="margin:24px 0 8px;font-size:20px;line-height:28px;font-weight:700;color:{INK};">'),
-    (r"<h2>", f'<h2 style="margin:28px 0 10px;padding-top:18px;border-top:1px solid {LINE};font-size:16px;line-height:24px;font-weight:700;color:{INK};">'),
+    (r"<h2>", f'<h2 style="margin:26px 0 10px;padding-top:18px;border-top:1px solid {LINE};font-size:16px;line-height:24px;font-weight:700;color:{INK};">'),
     (r"<h3>", f'<h3 style="margin:18px 0 6px;font-size:14px;line-height:20px;font-weight:700;color:{INK};">'),
     (r"<p>", f'<p style="margin:0 0 10px;font-size:14px;line-height:22px;color:{SOFT};">'),
     (r"<ul>", '<ul style="margin:0 0 12px;padding-left:20px;">'),
     (r"<ol>", '<ol style="margin:0 0 12px;padding-left:20px;">'),
     (r"<li>", f'<li style="margin:0 0 6px;font-size:14px;line-height:22px;color:{SOFT};">'),
     (r"<strong>", f'<strong style="color:{INK};font-weight:600;">'),
-    (r"<table>", f'<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;margin:6px 0 14px;font-size:13px;">'),
-    (r"<th>", f'<th style="text-align:left;padding:6px 8px;border-bottom:1px solid {LINE};color:{MUTED};font-weight:600;">'),
-    (r"<td>", f'<td style="padding:6px 8px;border-bottom:1px solid {LINE};color:{SOFT};">'),
+    (r"<table>", '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;margin:6px 0 14px;font-size:13px;">'),
     (r"<blockquote>", f'<blockquote style="margin:0 0 12px;padding:8px 12px;border-left:3px solid {LINE};color:{MUTED};">'),
     (r"<hr />", f'<hr style="border:none;border-top:1px solid {LINE};margin:20px 0;" />'),
 ]
 
+# A table cell is "numeric" when it is a number, amount or percentage (optionally bold / with a trailing note)
+_NUMERIC_CELL = re.compile(r"^[−+\-±~]?\s*[\d\u00a0 .,]+\s*(?:zł|%|EUR|€|PLN|h|szt\.?|zam\.?)?(?:\s*\(.*\))?\s*$", re.I)
 
-def email_html(*, label: str, title: str, body_html: str, url: str | None, footer: str) -> str:
-    content = body_html
+
+def _is_numeric(inner: str) -> bool:
+    text = re.sub(r"<[^>]+>", "", inner).strip()
+    return bool(text) and bool(_NUMERIC_CELL.match(text)) and any(ch.isdigit() for ch in text[:12])
+
+
+def _numeric_columns(table: str) -> set[int]:
+    """Columns where at least half of the non-empty body cells are numbers / amounts / percentages."""
+    rows = re.findall(r"<tr>(.*?)</tr>", table, flags=re.S)
+    body_cells = [re.findall(r"<td(?: [^>]*)?>(.*?)</td>", r, flags=re.S) for r in rows]
+    body_cells = [r for r in body_cells if r]
+    numeric_cols: set[int] = set()
+    if body_cells:
+        for col in range(max(len(r) for r in body_cells)):
+            vals = [r[col] for r in body_cells if col < len(r) and re.sub(r"<[^>]+>", "", r[col]).strip()]
+            if vals and sum(_is_numeric(v) for v in vals) * 2 >= len(vals):
+                numeric_cols.add(col)
+    return numeric_cols
+
+
+def _style_table(table: str) -> str:
+    """Right-align (tabular figures) columns that hold numbers; header cells follow their column."""
+    numeric_cols = _numeric_columns(table)
+
+    def fix_row(m: re.Match) -> str:
+        idx = -1
+
+        def cell(c: re.Match) -> str:
+            nonlocal idx
+            idx += 1
+            tag, inner = c.group(1), c.group(2)
+            num = idx in numeric_cols
+            align = "right" if num else "left"
+            if tag == "th":
+                style = (f"text-align:{align};padding:6px 8px;border-bottom:1px solid {LINE};color:{MUTED};"
+                         "font-size:12px;font-weight:600;")
+            else:
+                style = (f"text-align:{align};padding:6px 8px;border-bottom:1px solid {LINE};color:{SOFT};"
+                         + (NUM + "white-space:nowrap;" if num else ""))
+            return f'<{tag} style="{style}">{inner}</{tag}>'
+
+        return "<tr>" + re.sub(r"<(td|th)(?: [^>]*)?>(.*?)</\1>", cell, m.group(1), flags=re.S) + "</tr>"
+
+    return re.sub(r"<tr>(.*?)</tr>", fix_row, table, flags=re.S)
+
+
+def _style_cells(content: str) -> str:
+    return re.sub(r"<table>.*?</table>", lambda m: _style_table(m.group(0)), content, flags=re.S)
+
+
+def email_html(*, label: str, title: str, body_html: str, url: str | None, footer: str,
+               lead: str = "", kpi_html: str = "", sources: str = "") -> str:
+    content = _style_cells(body_html)  # before inlining, while tags are still bare
     for pattern, repl in _INLINE:
         content = re.sub(pattern, repl, content)
     content = re.sub(r'<a href=', f'<a style="color:{PRIMARY};text-decoration:none;font-weight:500;" href=', content)
@@ -75,12 +153,34 @@ def email_html(*, label: str, title: str, body_html: str, url: str | None, foote
         f"Otwórz w panelu</a>"
         if url else ""
     )
+    lead_html = (
+        f'<div style="margin:0 0 18px;padding:12px 14px;background:{PRIMARY_SOFT};border-radius:10px;'
+        f'font-size:15px;line-height:23px;color:{INK};">{html.escape(lead)}</div>'
+        if lead else ""
+    )
+    kpi_block = (
+        f'<div style="margin:0 0 6px;padding:0 0 4px;">{kpi_html}</div>' if kpi_html else ""
+    )
+    sources_html = (
+        f'<div style="margin-top:18px;padding-top:12px;border-top:1px solid {LINE};font-size:12px;line-height:18px;color:{MUTED};">'
+        f'<span style="font-weight:600;color:{SOFT};">Źródła:</span> {html.escape(sources)}</div>'
+        if sources else ""
+    )
+    preheader = html.escape(lead[:180]) if lead else ""
     return f"""<!doctype html>
 <html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(title)}</title></head>
-<body style="margin:0;padding:0;background:{CANVAS};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+<meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light">
+<title>{html.escape(title)}</title>
+<style>
+  @media only screen and (max-width: 480px) {{
+    .mb-outer {{ padding: 12px 4px !important; }}
+    .mb-card {{ padding: 20px 14px 18px !important; border-radius: 10px !important; }}
+  }}
+</style></head>
+<body style="margin:0;padding:0;background:{CANVAS};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">{preheader}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{CANVAS};">
-<tr><td align="center" style="padding:24px 12px;">
+<tr><td class="mb-outer" align="center" style="padding:24px 12px;">
   <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;">
     <tr><td style="padding:0 4px 14px;">
       <table role="presentation" cellpadding="0" cellspacing="0"><tr>
@@ -89,10 +189,13 @@ def email_html(*, label: str, title: str, body_html: str, url: str | None, foote
         <td style="padding-left:6px;font-size:12px;color:{FAINT};">Agents</td>
       </tr></table>
     </td></tr>
-    <tr><td style="background:#FFFFFF;border:1px solid {LINE};border-radius:10px;padding:28px 28px 24px;">
+    <tr><td class="mb-card" style="background:#FFFFFF;border:1px solid {LINE};border-radius:12px;padding:26px 24px 24px;">
       <div style="font-size:12px;font-weight:600;color:{PRIMARY};margin-bottom:6px;">{html.escape(label)}</div>
-      <div style="font-size:20px;line-height:28px;font-weight:700;color:{INK};margin-bottom:14px;">{html.escape(title)}</div>
+      <div style="font-size:21px;line-height:28px;font-weight:700;color:{INK};margin-bottom:16px;">{html.escape(title)}</div>
+      {lead_html}
+      {kpi_block}
       {content}
+      {sources_html}
       <div style="margin-top:22px;">{button}</div>
     </td></tr>
     <tr><td style="padding:14px 6px;font-size:11px;line-height:16px;color:{FAINT};">{html.escape(footer)}</td></tr>

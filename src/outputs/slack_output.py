@@ -2,26 +2,33 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
-
-from slack_sdk import WebClient
-
-from src.common.config import get_env
 
 logger = logging.getLogger(__name__)
 
 
-def _chunks(text: str, size: int = 3900) -> list[str]:
-    out = []
+def _chunks(text: str, size: int = 3800) -> list[str]:
+    """Split at line breaks (prefer blank lines); a ``` block cut in half is closed and reopened."""
+    out: list[str] = []
+    carry_fence = False
     while text:
+        if carry_fence:
+            text = "```\n" + text
+            carry_fence = False
         if len(text) <= size:
             out.append(text)
             break
-        cut = text[:size].rfind("\n")
+        window = text[:size]
+        cut = window.rfind("\n\n")
+        if cut < size // 2:
+            cut = window.rfind("\n")
         cut = cut if cut > 0 else size
-        out.append(text[:cut])
+        chunk = text[:cut]
+        if chunk.count("```") % 2 == 1:
+            chunk += "\n```"
+            carry_fence = True
+        out.append(chunk)
         text = text[cut:].lstrip("\n")
     return out
 
@@ -57,10 +64,13 @@ def md_to_slack(md: str) -> str:
     return "\n".join(out)
 
 
-async def post_text(channel: str, text: str) -> None:
-    client = WebClient(token=get_env("SLACK_BOT_TOKEN"))
+async def post_text(channel: str, text: str) -> str:
+    """Post in 3900-char chunks. `channel` may be '#name', a channel id or a user id (DM from the bot)."""
+    from src.connectors.slack_api import SlackAPI
+
+    api = SlackAPI()
+    target = await api.resolve_target(channel)
     for chunk in _chunks(text):
-        await asyncio.to_thread(
-            client.chat_postMessage, channel=channel, text=chunk, unfurl_links=False, unfurl_media=False
-        )
+        await api.post(target, chunk)
     logger.info(f"Slack: posted to {channel}")
+    return target

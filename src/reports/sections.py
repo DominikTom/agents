@@ -258,6 +258,64 @@ async def build_team(ctx: ReportContext) -> dict:
     }
 
 
+def _team_person(u: dict, full: bool = True) -> dict:
+    d = u.get("data") or {}
+    out = {
+        "osoba": u.get("person_name"),
+        "dzien": u["day"].isoformat() if hasattr(u["day"], "isoformat") else u["day"],
+        "podsumowanie": d.get("summary"),
+        "blokery": d.get("blockers") or [],
+        "plan": d.get("next") or [],
+        "plan_jakosc": d.get("plan_quality"),
+        "focus": d.get("focus"),
+        "uwaga_dla_ceo": d.get("attention"),
+    }
+    if full:
+        out["zrobione"] = d.get("done") or []
+        out["w_toku"] = d.get("in_progress") or []
+        out["os_do_aktualizacji"] = [
+            f"{x.get('title')}: {x.get('current_status')} → {x.get('suggested_status')} ({x.get('note')})"
+            for x in d.get("os_updates") or []
+        ]
+        out["praca_poza_os"] = [x.get("title") for x in d.get("not_in_os") or []]
+        if not d.get("os_linked"):
+            out["uwaga"] = "osoba niepowiązana z OS — nie porównano z zadaniami"
+    return out
+
+
+async def build_team_updates(ctx: ReportContext) -> dict:
+    from src.processing.team_updates import last_workday, team_overview
+
+    if ctx.kind == "weekly":
+        days = [week_start(ctx.today) + timedelta(days=i) for i in range((ctx.today - week_start(ctx.today)).days + 1)]
+    elif ctx.kind == "wrap":
+        days = [ctx.today]
+    else:
+        days = [last_workday(ctx.today)]
+    per_day = [await team_overview(ctx.db, d) for d in days if d.weekday() < 5]
+    if not any(o["channels_configured"] for o in per_day):
+        raise RuntimeError("Slack: nie wybrano kanałów z raportami dziennymi (panel → Źródła → Slack)")
+    if ctx.kind == "weekly":
+        people: dict[str, dict] = {}
+        for o in per_day:
+            for u in o["updates"]:
+                p = people.setdefault(u["person_name"], {"osoba": u["person_name"], "dni_z_raportem": 0, "dni": []})
+                p["dni_z_raportem"] += 1
+                p["dni"].append(_team_person(u, full=False))
+        return {
+            "dni_robocze": [d.isoformat() for d in days if d.weekday() < 5],
+            "osoby": list(people.values()),
+            "brak_raportu": {o["day"].isoformat(): [m["name"] for m in o["missing"]] for o in per_day if o["missing"]},
+        }
+    o = per_day[0] if per_day else {"day": days[0], "updates": [], "missing": [], "no_plan": []}
+    return {
+        "dzien": o["day"].isoformat(),
+        "raporty": [_team_person(u) for u in o["updates"]],
+        "brak_raportu": [m["name"] for m in o["missing"]],
+        "brak_planu": o["no_plan"],
+    }
+
+
 async def build_projects(ctx: ReportContext) -> dict:
     os_ = await ctx.os()
     out = {"wymagaja_uwagi": os_.projects_attention()}
@@ -313,6 +371,7 @@ BUILDERS = {
     "projects": build_projects,
     "topics": build_topics,
     "slack": build_slack,
+    "team_updates": build_team_updates,
 }
 
 

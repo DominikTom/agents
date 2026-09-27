@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import html
 import logging
 import time
 from datetime import timedelta
@@ -11,7 +10,8 @@ from src.ai.client import AIClient
 from src.common.config import get_env_optional, load_config
 from src.common.timeutil import fmt_date_pl, now as now_local
 from src.outputs.email_output import email_configured, send_email
-from src.reports.kpi import render_kpi
+from src.reports.kpi import kpi_data, kpi_email_html, kpi_markdown
+from src.reports.lineage import sources_line
 from src.reports.profiles import LENGTHS, SECTION_CATALOG, load_general, load_profiles
 from src.reports.render import email_html, split_lead, to_html
 from src.reports.sections import ReportContext, dumps, gather_sections, report_window
@@ -93,8 +93,8 @@ class ReportEngine:
             window_start=report_window(kind, current), config=self.config,
         )
         try:
-            await self._prepare(kind)
             enabled = [s["key"] for s in profile["sections"] if s.get("enabled")]
+            await self._prepare(kind, enabled)
             data, errors = await gather_sections(ctx, [k for k in enabled if SECTION_CATALOG[k]["data"]])
 
             blocks = [
@@ -107,12 +107,13 @@ class ReportEngine:
                 elif k in errors:
                     blocks.append(f"=== DANE: {SECTION_CATALOG[k]['label']} === NIEDOSTĘPNE ({errors[k]})")
 
-            kpi_md = ""
+            kpi = None
             if (profile.get("kpi") or {}).get("enabled"):
                 try:
-                    kpi_md = render_kpi(await ctx.dash(), profile["kpi"])
+                    kpi = kpi_data(await ctx.dash(), profile["kpi"])
                 except Exception as e:
                     errors["kpi"] = str(e)[:200]
+            kpi_md = kpi_markdown(kpi)
             if kpi_md:
                 blocks.append(
                     "=== TABELA „LICZBY” (wstawiana automatycznie na górę raportu, przed Twoim tekstem) ===\n" + kpi_md
@@ -130,11 +131,12 @@ class ReportEngine:
                 max_tokens=24000 if kind == "weekly" else 16000,
                 purpose=key,
             )
-            lead, body = split_lead(text)
-            if kpi_md:
-                body = f"{kpi_md}\n\n{body}"
+            lead, ai_body = split_lead(text)
+            # Markdown body (Slack, MCP, plain text) carries the KPI table; the HTML is the AI part only —
+            # the panel and e-mail render the KPI block from meta["kpi"] in the design system.
+            body = f"{kpi_md}\n\n{ai_body}" if kpi_md else ai_body
             title = f"{profile.get('name') or KIND_LABELS.get(kind, key)} — {fmt_date_pl(current.date())}"
-            html_body = to_html(body)
+            html_body = to_html(ai_body)
             meta = {
                 "kind": kind,
                 "sections": enabled,
@@ -142,6 +144,9 @@ class ReportEngine:
                 "window_start": ctx.window_start.isoformat(),
                 "preview": preview,
                 "model": profile.get("model"),
+                "kpi": kpi,
+                "sources": sources_line([k for k in enabled if k in data or not SECTION_CATALOG[k]["data"]],
+                                        (kpi or {}).get("as_of")),
             }
             report_id = await self.db.save_report(
                 agent_name=key, summary=lead, body=body,
@@ -152,7 +157,7 @@ class ReportEngine:
 
             delivered: dict = {}
             if deliver and not preview:
-                delivered = await self.deliver(report_id, profile, general, title, lead, body, html_body)
+                delivered = await self.deliver(report_id, profile, general, title, lead, body, html_body, meta=meta)
 
             if kind == "wrap" and not preview:
                 await self._save_daily_summary(body, enabled, list(errors))
@@ -169,8 +174,8 @@ class ReportEngine:
                 await self.db.log_run(key, "error", str(e)[:500])
             raise
 
-    async def _prepare(self, kind: str) -> None:
-        """Make sure chat digests are fresh before writing."""
+    async def _prepare(self, kind: str, enabled: list[str] | None = None) -> None:
+        """Make sure chat digests (and team daily reports, if that section is on) are fresh before writing."""
         from src.processing.chat_digest import ChatDigester
 
         digester = ChatDigester(self.db, self.ai)
@@ -182,9 +187,22 @@ class ReportEngine:
                 await digester.run(d)
             except Exception as e:
                 logger.warning(f"Digest before report failed: {e}")
+        if enabled and "team_updates" in enabled:
+            from src.ingestion.slack_ingest import SlackIngestor
+            from src.processing.team_updates import TeamUpdates, last_workday
+
+            try:
+                await SlackIngestor(self.db).sync()
+                tu = TeamUpdates(self.db, self.ai)
+                today_ = now_local().date()
+                for d in ([last_workday(today_)] if kind == "morning" else [today_]):
+                    await tu.run(d)
+            except Exception as e:
+                logger.warning(f"Team updates before report failed: {e}")
 
     async def deliver(self, report_id: int, profile: dict, general: dict, title: str, lead: str,
-                      body: str, html_body: str) -> dict:
+                      body: str, html_body: str, meta: dict | None = None) -> dict:
+        meta = meta or {}
         delivered: dict = {}
         base_url = (get_env_optional("PUBLIC_BASE_URL") or get_env_optional("MCP_BASE_URL") or "").rstrip("/")
         url = f"{base_url}/reports/{report_id}" if base_url else None
@@ -196,10 +214,13 @@ class ReportEngine:
                     html_mail = email_html(
                         label=profile.get("name") or "Raport",
                         title=title,
-                        body_html=(f"<p>{html.escape(lead)}</p>" if lead else "") + html_body,
+                        lead=lead,
+                        kpi_html=kpi_email_html(meta.get("kpi")),
+                        body_html=html_body,
+                        sources=meta.get("sources") or "",
                         url=url,
-                        footer="Wygenerowane przez MyBed Agents na podstawie WhatsApp, Gmaila, kalendarza, MyBed OS i dasha. "
-                               "Zakres i godzinę raportu zmienisz w panelu: Studio raportów.",
+                        footer="Wygenerowane przez MyBed Agents. Zakres, liczby i godzinę raportu zmienisz w panelu: "
+                               "Studio raportów. Skąd są dane: panel → Źródła danych → Skąd dane.",
                     )
                     provider = await send_email(recipients, title, html_mail, f"{lead}\n\n{body}")
                     delivered["email"] = {"to": recipients, "via": provider}
@@ -217,6 +238,7 @@ class ReportEngine:
                 text = f"*{title}*\n{md_to_slack(lead)}\n\n{md_to_slack(body)}"
                 await post_text(channel, text + (f"\n\n<{url}|Otwórz w panelu>" if url else ""))
                 delivered["slack"] = channel
+                delivered.pop("slack_error", None)
             except Exception as e:
                 logger.error(f"Slack delivery failed: {e}")
                 delivered["slack_error"] = str(e)[:300]

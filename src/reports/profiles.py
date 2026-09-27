@@ -79,6 +79,13 @@ SECTION_CATALOG: dict[str, dict] = {
         "instruction": "Kto ma najwięcej zaległości (z przykładami), aktywne blokery z następnym krokiem, decyzje do podjęcia. Wskaż, gdzie Dominik powinien zainterweniować.",
         "data": True,
     },
+    "team_updates": {
+        "label": "Raporty dnia zespołu",
+        "description": "Dzienne raporty ludzi ze Slacka: co dowieźli, plan, blokery, kto nie wysłał raportu i rozjazd z OS.",
+        "instruction": "Najpierw alarmy: kto nie wysłał raportu, kto nie ma planu na kolejny dzień/tydzień, realne blokady (szczególnie zależne od Dominika). Potem po jednej linii na osobę: co dowiozła i na czym się skupia. Na końcu rozjazd z OS: zadania, które wg raportu są zrobione/w toku, a w OS mają inny status, i istotna praca, której nie ma w OS. Nie przepisuj całych raportów.",
+        "data": True,
+        "auto_enable": True,
+    },
     "projects": {
         "label": "Projekty (OS)",
         "description": "Projekty wymagające uwagi: czerwone/żółte, po terminie, bez aktualizacji.",
@@ -155,7 +162,7 @@ DEFAULT_PROFILES: dict[str, dict] = {
         "instructions": "",
         "kpi": _kpi(["1", "7", "30"], ["revenue", "orders", "aov", "spend_meta", "spend_google", "spend_total"]),
         "sections": _sections(
-            ["top", "awaiting", "calendar", "sales", "marketing", "chats", "commitments", "os_me", "team", "email"],
+            ["top", "awaiting", "calendar", "sales", "marketing", "chats", "team_updates", "commitments", "os_me", "team", "email"],
             ["projects", "showrooms", "topics", "risks", "plan", "slack"],
         ),
     },
@@ -173,7 +180,7 @@ DEFAULT_PROFILES: dict[str, dict] = {
         "kpi": _kpi(["1", "7"], ["revenue", "orders", "spend_total"], per_shop=False),
         "sections": _sections(
             ["top", "topics", "chats", "awaiting", "commitments", "sales", "calendar", "risks", "plan"],
-            ["email", "marketing", "os_me", "team", "projects", "showrooms", "slack"],
+            ["email", "marketing", "os_me", "team", "team_updates", "projects", "showrooms", "slack"],
         ),
     },
     "weekly_review": {
@@ -189,7 +196,7 @@ DEFAULT_PROFILES: dict[str, dict] = {
         "instructions": "",
         "kpi": _kpi(["7", "30"], ["revenue", "orders", "aov", "spend_meta", "spend_google", "spend_total"]),
         "sections": _sections(
-            ["top", "sales", "marketing", "showrooms", "projects", "team", "topics", "chats", "commitments", "risks", "calendar", "plan"],
+            ["top", "sales", "marketing", "showrooms", "projects", "team", "team_updates", "topics", "chats", "commitments", "risks", "calendar", "plan"],
             ["awaiting", "email", "os_me", "slack"],
         ),
     },
@@ -222,9 +229,20 @@ def merge_profiles(stored: dict | None) -> dict[str, dict]:
                 if s.get("key") in SECTION_CATALOG and s["key"] not in seen:
                     seen.add(s["key"])
                     sections.append({"key": s["key"], "enabled": bool(s.get("enabled")), "note": s.get("note", "")})
+            prev_key = None
             for s in default["sections"]:
                 if s["key"] not in seen:
-                    sections.append({**s, "enabled": False})
+                    # sections added after the user saved stay off — unless the feature is meant to show up on its
+                    # own; those go right after their neighbour from the default order
+                    on = s["enabled"] and SECTION_CATALOG[s["key"]].get("auto_enable", False)
+                    item = {**s, "enabled": on}
+                    keys = [x["key"] for x in sections]
+                    if on and prev_key in keys:
+                        sections.insert(keys.index(prev_key) + 1, item)
+                    else:
+                        sections.append(item)
+                    seen.add(s["key"])
+                prev_key = s["key"]
             p["sections"] = sections
         kpi = {**default["kpi"], **(p.get("kpi") or {})}
         kpi["periods"] = [x for x in KPI_PERIODS if x in {str(v) for v in kpi.get("periods") or []}]

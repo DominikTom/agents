@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, status_dot %}
+{% block title %}Slack{% endblock %}
+
+{% block content %}
+<a href="/sources" class="btn-ghost -ml-2.5 mb-3">{{ icon("chevron-left") }} Źródła danych</a>
+<div class="mb-5">
+  <h2 class="page-title">Slack</h2>
+  <p class="page-subtitle">Bot agentów czyta wybrane kanały (przede wszystkim dzienne raporty zespołu) i wysyła raporty na kanał ustawiony w Studio.</p>
+</div>
+
+{% if not configured %}
+<div class="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+  <b>Brak SLACK_BOT_TOKEN w .env.</b> Token bota znajdziesz w api.slack.com/apps → Twoja aplikacja → OAuth &amp; Permissions → Bot User OAuth Token (zaczyna się od <span class="font-mono">xoxb-</span>).
+</div>
+{% elif error %}
+<div class="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{{ icon("circle-alert") }} {{ error }}</div>
+{% endif %}
+
+<div class="grid grid-cols-1 gap-5 lg:grid-cols-5">
+  <div class="space-y-5 lg:col-span-3">
+    <section class="card overflow-hidden">
+      <div class="panel-head">
+        <div>
+          <h3 class="section-title">Kanały bota</h3>
+          <p class="mt-0.5 text-xs text-ink-muted">„Czytaj” — wiadomości trafiają do bazy agentów. „Raporty dnia” — AI analizuje je jako dzienne raporty ludzi (strona Zespół).</p>
+        </div>
+        {% if configured %}<button class="btn-secondary !py-1.5 text-xs" data-run="/api/jobs/slack_sync/run" data-msg="Synchronizuję" data-reload="5000">{{ icon("refresh-cw", "h-3.5 w-3.5") }} Synchronizuj</button>{% endif %}
+      </div>
+      {% set members = channels|selectattr("1.member")|list %}
+      {% if members %}
+      <ul class="divide-y divide-line">
+        {% for cid, ch in members %}
+        {% set st = stats.get(cid) %}
+        <li class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-1.5 text-sm font-medium text-ink">
+              <span class="text-ink-faint">{{ icon("hash", "h-3.5 w-3.5") }}</span>{{ ch.name }}
+              {% if ch.private %}<span class="badge bg-surface-2 text-ink-muted">prywatny</span>{% endif %}
+            </div>
+            <div class="mt-0.5 text-xs text-ink-muted">{% if st %}{{ st.n }} wiad. / 7 dni · ostatnia {{ st.last_at|ago }}{% else %}brak wiadomości w bazie z ostatnich 7 dni{% endif %}</div>
+          </div>
+          <label class="flex items-center gap-2 text-xs text-ink-soft">
+            <input type="checkbox" class="peer sr-only" {{ 'checked' if ch.read }} onchange="toggleCh('{{ cid }}', 'read', this)">
+            <span class="toggle"></span> Czytaj
+          </label>
+          <label class="flex items-center gap-2 text-xs text-ink-soft">
+            <input type="checkbox" class="peer sr-only" {{ 'checked' if ch.daily }} onchange="toggleCh('{{ cid }}', 'daily', this)">
+            <span class="toggle"></span> Raporty dnia
+          </label>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="empty">Bot nie jest jeszcze na żadnym kanale.</div>
+      {% endif %}
+    </section>
+
+    {% if invite %}
+    <section class="card p-5 space-y-3">
+      <div>
+        <h3 class="section-title">Zaproś bota na kanały z raportami dnia</h3>
+        <p class="mt-1 text-xs text-ink-muted">Te kanały są prywatne — bot widzi je dopiero po zaproszeniu. Na każdym kanale wpisz w Slacku:</p>
+      </div>
+      <div class="rounded-xl bg-canvas px-3 py-2 font-mono text-[13px] text-ink">/invite @{{ identity.bot if identity and identity.bot else "nazwa-bota" }}</div>
+      <div class="flex flex-wrap gap-1.5">
+        {% for n in invite %}<span class="chip border-line text-ink-soft">#{{ n }}</span>{% endfor %}
+      </div>
+      <p class="text-xs text-ink-faint">Potem kliknij „Synchronizuj” — kanał pojawi się na liście powyżej i od razu będzie czytany.</p>
+    </section>
+    {% endif %}
+  </div>
+
+  <div class="space-y-5 lg:col-span-2">
+    <section class="card p-5 space-y-3">
+      <h3 class="section-title">Bot</h3>
+      {% if identity %}
+      <dl class="space-y-1.5 text-xs">
+        <div class="flex justify-between gap-3"><dt class="text-ink-muted">Nazwa</dt><dd class="font-mono text-ink-soft">@{{ identity.bot }}</dd></div>
+        <div class="flex justify-between gap-3"><dt class="text-ink-muted">Workspace</dt><dd class="truncate font-mono text-ink-soft">{{ identity.team }}</dd></div>
+        <div class="flex justify-between gap-3"><dt class="text-ink-muted">Ostatnia synchronizacja</dt><dd class="font-mono text-ink-soft">{{ run.ran_at|ago if run else "—" }}</dd></div>
+      </dl>
+      {% if run and run.status == "error" %}<p class="rounded-lg bg-red-50 px-2.5 py-2 text-xs text-red-700">{{ run.error_message }}</p>{% endif %}
+      {% else %}
+      <p class="text-xs text-ink-muted">Brak połączenia z botem.</p>
+      {% endif %}
+
+      <div class="border-t border-line pt-3">
+        <div class="text-xs font-medium text-ink-muted">Uprawnienia bota</div>
+        {% if missing_scopes %}
+        <p class="mt-1.5 text-xs text-red-700">Brakuje uprawnień — dodaj je w api.slack.com → Twoja aplikacja → OAuth &amp; Permissions → Bot Token Scopes, potem „Reinstall to Workspace”:</p>
+        <ul class="mt-1.5 space-y-1 text-xs">
+          {% for s, why in missing_scopes %}<li><span class="font-mono text-ink">{{ s }}</span> <span class="text-ink-muted">— {{ why }}</span></li>{% endfor %}
+        </ul>
+        {% elif identity %}
+        <p class="mt-1.5 flex items-center gap-1.5 text-xs text-emerald-700">{{ icon("circle-check", "h-3.5 w-3.5") }} Wszystkie potrzebne uprawnienia są nadane.</p>
+        {% endif %}
+        {% if optional_missing %}
+        <p class="mt-1.5 text-xs text-ink-faint">Opcjonalnie: {% for s, why in optional_missing %}<span class="font-mono">{{ s }}</span> ({{ why }}){% endfor %}.</p>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="card p-5 space-y-3">
+      <div>
+        <h3 class="section-title">Raporty na Slacka</h3>
+        <p class="mt-1 text-xs text-ink-muted">Kanał ustawiasz osobno dla każdego raportu w Studio. Może to być <span class="font-mono">#kanał</span> (bot musi na nim być) albo Twój identyfikator <span class="font-mono">U…</span> — wtedy raport przychodzi prywatnie od bota.</p>
+      </div>
+      {% if targets %}
+      <ul class="space-y-1 text-xs">{% for name, ch in targets %}<li class="flex justify-between gap-3"><span class="text-ink-muted">{{ name }}</span><span class="font-mono text-ink-soft">{{ ch }}</span></li>{% endfor %}</ul>
+      {% else %}
+      <p class="rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-700">Żaden raport nie ma ustawionego kanału — dlatego nic nie przychodzi na Slacka. Ustaw go w <a class="font-semibold underline" href="/studio/morning_briefing">Studio raportów</a>.</p>
+      {% endif %}
+      <form class="flex gap-2" onsubmit="testSlack(event)">
+        <input name="target" class="input !py-1.5 font-mono text-[13px]" placeholder="#morning-briefing" value="{{ targets[0][1] if targets else '' }}">
+        <button class="btn-secondary shrink-0 !py-1.5 text-xs" id="test-btn">{{ icon("send", "h-3.5 w-3.5") }} Wyślij test</button>
+      </form>
+    </section>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function toggleCh(id, field, el) {
+  const fd = new FormData()
+  fd.append('channel_id', id); fd.append('field', field); fd.append('value', el.checked ? 'on' : 'off')
+  try {
+    await post('/api/slack/channel', fd)
+    toast('Zapisano', 'success')
+    if (field === 'daily' && el.checked) setTimeout(() => location.reload(), 600)
+  } catch (e) { el.checked = !el.checked; toast(e.message, 'error') }
+}
+async function testSlack(e) {
+  e.preventDefault()
+  const btn = document.getElementById('test-btn')
+  busy(btn, true, 'Wysyłam…')
+  try { await post('/api/slack/test', new FormData(e.target)); toast('Wysłano — sprawdź Slacka', 'success') }
+  catch (err) { toast(err.message, 'error') }
+  finally { busy(btn, false) }
+}
+</script>
+{% endblock %}

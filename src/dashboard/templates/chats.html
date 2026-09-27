@@ -11,7 +11,7 @@
 
 <div class="grid grid-cols-1 gap-5 lg:grid-cols-[340px_1fr]">
   {# ── Chat list ── #}
-  <section class="card flex flex-col overflow-hidden lg:h-[calc(100vh-9rem)] {{ 'max-lg:hidden' if selected }}">
+  <section class="card flex flex-col overflow-hidden lg:h-[calc(100dvh-9rem)] {{ 'max-lg:hidden' if selected }}">
     <div class="space-y-3 border-b border-line p-3">
       <div class="flex items-center justify-between">
         <h2 class="section-title">Rozmowy WhatsApp</h2>
@@ -67,7 +67,7 @@
   </section>
 
   {# ── Selected chat ── #}
-  <section class="card flex flex-col overflow-hidden lg:h-[calc(100vh-9rem)] {{ 'max-lg:hidden' if not selected }}">
+  <section class="card flex flex-col overflow-hidden lg:h-[calc(100dvh-9rem)] {{ 'max-lg:hidden' if not selected }}">
     {% if selected %}
     <div class="flex items-center gap-3 border-b border-line px-4 py-3">
       <a href="/chats?filter={{ filter }}" class="btn-ghost -ml-2 !p-1.5 lg:hidden">{{ icon("chevron-left") }}</a>

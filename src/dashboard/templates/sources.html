@@ -25,9 +25,12 @@
 {%- endmacro %}
 
 {% block content %}
-<div class="mb-5">
-  <h2 class="page-title">Źródła danych</h2>
-  <p class="page-subtitle">Skąd agenci biorą wiedzę i czy wszystko jest aktualne.</p>
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h2 class="page-title">Źródła danych</h2>
+    <p class="page-subtitle">Skąd agenci biorą wiedzę i czy wszystko jest aktualne.</p>
+  </div>
+  <a href="/sources/lineage" class="btn-secondary">{{ icon("workflow") }} Skąd dokładnie są dane w raportach</a>
 </div>
 
 {% set hmap = {} %}{% for h in health %}{% set _ = hmap.update({h.key: h}) %}{% endfor %}
@@ -66,6 +69,10 @@
 
   {{ source_card("Claude API", "sparkles", "ok" if config.anthropic else "off", [("Raporty", "Claude Opus 5"), ("Streszczenia czatów", "Claude Sonnet 5")], href="/system", action_label="Zużycie") }}
 
-  {{ source_card("Slack (opcjonalnie)", "hash", "ok" if config.slack else "off", [("Użycie", "sekcja „Slack” i wysyłka raportów")]) }}
+  {% set sl = hmap.slack %}
+  {{ source_card("Slack", "hash", (sl.state if sl.state != "empty" else "stale") if config.slack else "off",
+      [("Ostatnia wiadomość", sl.last_event|ago if sl.last_event else "—"), ("Wiadomości / 24h", sl.last_24h), ("Sync", (sl.run.ran_at|ago) if sl.run else "—")],
+      href="/sources/slack", action_label="Kanały i raporty dnia",
+      hint=(sl.run.error_message if sl.run and sl.run.status == "error" else (None if config.slack else "Dodaj <span class='font-mono'>SLACK_BOT_TOKEN</span> do .env — bot czyta dzienne raporty zespołu i wysyła raporty."))) }}
 </div>
 {% endblock %}

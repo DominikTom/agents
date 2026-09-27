@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, avatar, empty %}
+{% block title %}Zespół{% endblock %}
+
+{% block content %}
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h2 class="page-title">Raporty dnia zespołu</h2>
+    <p class="page-subtitle">Dzienne raporty ze Slacka przeczytane przez AI i porównane z zadaniami w MyBed OS. Nic nie zmienia się w OS bez Twojego kliknięcia.</p>
+  </div>
+  <div class="flex items-center gap-1.5">
+    <a href="/team?day={{ prev_day.isoformat() }}" class="btn-secondary !px-2 !py-1.5" aria-label="Poprzedni dzień">{{ icon("chevron-left") }}</a>
+    <span class="min-w-[9rem] text-center text-sm font-semibold text-ink">{{ day|datepl }}</span>
+    {% if next_day %}<a href="/team?day={{ next_day.isoformat() }}" class="btn-secondary !px-2 !py-1.5" aria-label="Następny dzień">{{ icon("chevron-right") }}</a>{% else %}<span class="btn-secondary pointer-events-none !px-2 !py-1.5 opacity-40">{{ icon("chevron-right") }}</span>{% endif %}
+    <button class="btn-primary !py-1.5" data-run="/api/team/analyze" data-params="day={{ day.isoformat() }}" data-busy="Analizuję…" data-msg="Analizuję raporty — odśwież za chwilę" data-reload="20000">{{ icon("sparkles") }} Przeanalizuj</button>
+  </div>
+</div>
+
+{% if not o.channels_configured %}
+<div class="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+  Nie ma jeszcze kanałów z raportami dnia. Wejdź w <a class="font-semibold underline" href="/sources/slack">Źródła → Slack</a>, zaproś bota na kanały (#dev-daily-updates, #kamila-daily-update…) i zaznacz „Raporty dnia”.
+</div>
+{% endif %}
+
+{# ── Alerts ── #}
+{% if o.missing or o.no_plan %}
+<div class="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+  {% if o.missing %}
+  <section class="rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
+    <div class="flex items-center gap-2 text-sm font-semibold text-red-700">{{ icon("triangle-alert", "h-4 w-4") }} Brak raportu ({{ o.missing|length }})</div>
+    <p class="mt-1 text-xs text-red-700">Te osoby zwykle raportują, a tego dnia nie wysłały raportu:</p>
+    <div class="mt-2 flex flex-wrap gap-1.5">{% for m in o.missing %}<span class="chip border-red-200 bg-surface text-red-700">{{ m.name }}</span>{% endfor %}</div>
+  </section>
+  {% endif %}
+  {% if o.no_plan %}
+  <section class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+    <div class="flex items-center gap-2 text-sm font-semibold text-amber-700">{{ icon("clock", "h-4 w-4") }} Brak planu ({{ o.no_plan|length }})</div>
+    <p class="mt-1 text-xs text-amber-700">Raport bez planu na kolejny dzień / tydzień — warto pokierować:</p>
+    <div class="mt-2 flex flex-wrap gap-1.5">{% for n in o.no_plan %}<span class="chip border-amber-200 bg-surface text-amber-700">{{ n }}</span>{% endfor %}</div>
+  </section>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if o.updates %}
+<div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
+  {% for u in o.updates %}
+  {% set d = u.data %}
+  <article class="card flex flex-col overflow-hidden">
+    <header class="flex items-start gap-3 border-b border-line px-4 py-3">
+      {{ avatar(u.person_name, "h-9 w-9 text-xs") }}
+      <div class="min-w-0 flex-1">
+        <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span class="text-sm font-semibold text-ink">{{ u.person_name }}</span>
+          {% if d.plan_quality == "missing" %}<span class="badge bg-amber-50 text-amber-700">brak planu</span>
+          {% elif d.plan_quality == "vague" %}<span class="badge bg-surface-2 text-ink-muted">plan ogólny</span>{% endif %}
+          {% if d.blockers %}<span class="badge bg-red-50 text-red-700">blokada</span>{% endif %}
+          {% if not d.os_linked %}<span class="badge bg-surface-2 text-ink-muted" title="Dopasuj osobę w zakładce Ludzie">bez powiązania z OS</span>{% endif %}
+        </div>
+        <div class="mt-0.5 text-xs text-ink-muted">{% for c in u.channels %}#{{ c }}{% if not loop.last %}, {% endif %}{% endfor %}{% if u.first_message_at %} · {{ u.first_message_at|hm }}{% endif %}{% if d.hours %} · {{ d.hours }}{% endif %}</div>
+      </div>
+    </header>
+    <div class="flex-1 space-y-3 px-4 py-3 text-sm">
+      {% if d.summary %}<p class="text-ink-soft">{{ d.summary }}</p>{% endif %}
+      {% if d.attention %}<p class="flex gap-2 rounded-lg bg-primary-soft px-3 py-2 text-[13px] text-primary-ink"><span class="mt-0.5 shrink-0">{{ icon("info", "h-3.5 w-3.5") }}</span><span>{{ d.attention }}</span></p>{% endif %}
+      {% for label, items, cls in [("Zrobione", d.done, "text-emerald-700"), ("W toku", d.in_progress, "text-ink-muted"), ("Plan", d.next, "text-primary-ink"), ("Blokady", d.blockers, "text-red-700")] %}
+      {% if items %}
+      <div>
+        <div class="text-xs font-medium {{ cls }}">{{ label }}</div>
+        <ul class="mt-1 space-y-0.5 text-[13px] text-ink-soft">{% for it in items %}<li class="flex gap-2"><span class="text-ink-faint">•</span><span>{{ it }}</span></li>{% endfor %}</ul>
+      </div>
+      {% endif %}
+      {% endfor %}
+      {% if d.focus %}<p class="text-xs text-ink-muted"><span class="font-medium text-ink-soft">Focus:</span> {{ d.focus }}</p>{% endif %}
+    </div>
+    {% if d.os_updates or d.not_in_os %}
+    <div class="space-y-2 border-t border-line bg-canvas/60 px-4 py-3">
+      <div class="text-xs font-medium text-ink-muted">Rozjazd z MyBed OS</div>
+      {% for x in d.os_updates %}
+      {% set key = "os_update:" ~ loop.index0 %}
+      <div class="flex items-start gap-2 text-[13px]">
+        <span class="mt-0.5 text-ink-faint">{{ icon("folder-kanban", "h-3.5 w-3.5") }}</span>
+        <div class="min-w-0 flex-1">
+          <a href="{{ x.link }}" target="_blank" rel="noopener" class="font-medium text-ink hover:underline">{{ x.title }}</a>
+          <span class="whitespace-nowrap font-mono text-[11px] text-ink-muted">{{ x.current_status }} → <span class="text-primary-ink">{{ x.suggested_status }}</span></span>
+          {% if x.note %}<div class="text-xs text-ink-muted">{{ x.note }}</div>{% endif %}
+        </div>
+        {% if key in (d.pushed or []) %}<span class="badge bg-emerald-50 text-emerald-700">w OS</span>
+        {% elif can_suggest %}<button class="btn-ghost !px-2 !py-1 text-xs" onclick="suggest(this, '{{ day.isoformat() }}', '{{ u.person_key }}', 'os_update', {{ loop.index0 }})">Do OS</button>{% endif %}
+      </div>
+      {% endfor %}
+      {% for x in d.not_in_os %}
+      {% set key = "not_in_os:" ~ loop.index0 %}
+      <div class="flex items-start gap-2 text-[13px]">
+        <span class="mt-0.5 text-amber-600">{{ icon("plus", "h-3.5 w-3.5") }}</span>
+        <div class="min-w-0 flex-1">
+          <span class="font-medium text-ink">{{ x.title }}</span> <span class="text-xs text-ink-muted">— nie ma w OS{% if x.project %} · {{ x.project }}{% endif %}</span>
+        </div>
+        {% if key in (d.pushed or []) %}<span class="badge bg-emerald-50 text-emerald-700">w OS</span>
+        {% elif can_suggest %}<button class="btn-ghost !px-2 !py-1 text-xs" onclick="suggest(this, '{{ day.isoformat() }}', '{{ u.person_key }}', 'not_in_os', {{ loop.index0 }})">Do OS</button>{% endif %}
+      </div>
+      {% endfor %}
+      {% if not can_suggest %}<p class="text-[11px] text-ink-faint">Wysyłanie propozycji do OS włączysz w Studio → O mnie i ustawienia („Propozycje AI”).</p>{% endif %}
+    </div>
+    {% endif %}
+  </article>
+  {% endfor %}
+</div>
+{% elif o.channels_configured %}
+<div class="card">{{ empty("Brak raportów z tego dnia" ~ (" — kliknij „Przeanalizuj”, jeśli raporty są już na Slacku." if o.missing else "."), "inbox") }}</div>
+{% endif %}
+
+<p class="mt-5 text-xs text-ink-faint">Analiza: Claude Sonnet, automatycznie o 8:50, 12:50 i co godzinę 16:50–19:50 (dni robocze). {% if run %}Ostatnio {{ run.ran_at|ago }}.{% endif %} Skąd dane: <a class="underline" href="/sources/lineage">Skąd dane</a>.</p>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function suggest(btn, day, person, kind, index) {
+  const fd = new FormData()
+  fd.append('day', day); fd.append('person_key', person); fd.append('kind', kind); fd.append('index', index)
+  busy(btn, true, '…')
+  try { await post('/api/team/suggest', fd); btn.outerHTML = '<span class="badge bg-emerald-50 text-emerald-700">w OS</span>'; toast('Wysłano do OS jako propozycję', 'success') }
+  catch (e) { toast(e.message, 'error'); busy(btn, false) }
+}
+</script>
+{% endblock %}

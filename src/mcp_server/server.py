@@ -191,6 +191,34 @@ async def get_latest_report(report: str = "morning_briefing") -> str:
 
 
 @mcp.tool()
+async def get_team_updates(day: str = "") -> str:
+    """Team daily reports from Slack (AI-read): per person done / in progress / plan / blockers, OS mismatches,
+    who did not report. day: YYYY-MM-DD, default = last workday (or today after 15:00)."""
+    from src.common.timeutil import now, today
+    from src.processing.team_updates import last_workday, team_overview
+
+    db = _get_db()
+    try:
+        d = date.fromisoformat(day) if day else None
+    except ValueError:
+        return "Bad date, use YYYY-MM-DD."
+    if d is None:
+        t = today()
+        d = t if t.weekday() < 5 and now().hour >= 15 else last_workday(t)
+    o = await team_overview(db, d)
+    if not o["channels_configured"]:
+        return "No Slack daily-report channels configured (panel → Źródła → Slack)."
+    return json.dumps({
+        "day": d.isoformat(),
+        "missing_report": [m["name"] for m in o["missing"]],
+        "no_plan": o["no_plan"],
+        "people": [{"person": u["person_name"], **{k: (u["data"] or {}).get(k) for k in
+                   ("summary", "done", "in_progress", "next", "blockers", "focus", "plan_quality", "attention",
+                    "os_updates", "not_in_os")}} for u in o["updates"]],
+    }, ensure_ascii=False, indent=1, default=str)
+
+
+@mcp.tool()
 async def get_daily_summary(days: int = 3) -> str:
     """Get recent AI-generated daily summaries.
 

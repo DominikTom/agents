@@ -11,16 +11,17 @@
   <button class="btn-secondary" data-run="/api/jobs/os_people_sync/run" data-msg="Synchronizuję ludzi z MyBed OS" data-reload="5000">{{ icon("refresh-cw") }} Pobierz z OS</button>
 </div>
 
-{% if unmapped %}
+{% for src, rows, title, hint in [("whatsapp", unmapped, "Nierozpoznani nadawcy WhatsApp", "Przypisz ich do osób — ich wiadomości dostaną nazwisko i rolę w raportach."), ("slack", unmapped_slack, "Nierozpoznani autorzy na Slacku", "Przypisz ich do osób z OS — wtedy ich raporty dnia porównamy z ich zadaniami w OS.")] %}
+{% if rows %}
 <section class="card mb-5 overflow-hidden">
   <div class="panel-head">
-    <div><h3 class="section-title">Nierozpoznani nadawcy WhatsApp</h3><p class="mt-0.5 text-xs text-ink-muted">Przypisz ich do osób — ich wiadomości dostaną nazwisko i rolę w raportach.</p></div>
-    <span class="badge bg-amber-50 font-mono text-amber-700">{{ unmapped|length }}</span>
+    <div><h3 class="section-title">{{ title }}</h3><p class="mt-0.5 text-xs text-ink-muted">{{ hint }}</p></div>
+    <span class="badge bg-amber-50 font-mono text-amber-700">{{ rows|length }}</span>
   </div>
   <div class="divide-y divide-line">
-    {% for u in unmapped %}
+    {% for u in rows %}
     <form method="post" action="/api/entity/alias" class="flex flex-wrap items-center gap-3 px-4 py-2.5">
-      <input type="hidden" name="source" value="whatsapp"><input type="hidden" name="alias_name" value="{{ u.sender_name }}">
+      <input type="hidden" name="source" value="{{ src }}"><input type="hidden" name="alias_name" value="{{ u.sender_name }}">
       <div class="min-w-0 flex-1">
         <span class="text-sm font-medium text-ink">{{ u.sender_name }}</span>
         <span class="ml-2 font-mono text-[11px] text-ink-faint">{{ u.message_count }} wiad. · {{ u.last_seen|ago }}</span>
@@ -35,19 +36,20 @@
   </div>
 </section>
 {% endif %}
+{% endfor %}
 
 <section class="card overflow-hidden">
   <div class="panel-head"><h3 class="section-title">Osoby i ich aliasy</h3><span class="badge bg-surface-2 font-mono text-ink-muted">{{ entities|length }}</span></div>
   <div class="overflow-x-auto">
-    <table class="w-full min-w-[720px] text-sm">
+    <table class="w-full min-w-[860px] text-sm">
       <thead><tr class="border-b border-line text-left text-xs text-ink-muted">
-        <th class="px-4 py-2 font-medium">Osoba</th><th class="px-4 py-2 font-medium">WhatsApp</th><th class="px-4 py-2 font-medium">E-mail</th><th class="px-4 py-2 text-right font-medium">Zdarzeń</th>
+        <th class="px-4 py-2 font-medium">Osoba</th><th class="px-4 py-2 font-medium">WhatsApp</th><th class="px-4 py-2 font-medium">E-mail</th><th class="px-4 py-2 font-medium">Slack</th><th class="px-4 py-2 text-right font-medium">Zdarzeń</th>
       </tr></thead>
       <tbody>
       {% for e in entities %}
       <tr class="border-b border-line last:border-0 align-top hover:bg-surface-2">
         <td class="px-4 py-2.5"><div class="flex items-center gap-2.5">{{ avatar(e.display_name) }}<span class="font-medium text-ink">{{ e.display_name }}</span></div></td>
-        {% for src in ["whatsapp", "gmail"] %}
+        {% for src in ["whatsapp", "gmail", "slack"] %}
         <td class="px-4 py-2.5">
           <div class="flex flex-wrap gap-1">
             {% for a in e.aliases_by_source.get(src, []) %}

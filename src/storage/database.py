@@ -276,6 +276,25 @@ CREATE TABLE IF NOT EXISTS ai_calls (
     ok BOOLEAN DEFAULT TRUE
 );
 
+-- Team daily reports (Slack daily-update channels) — one AI read per person per day
+CREATE TABLE IF NOT EXISTS team_updates (
+    id SERIAL PRIMARY KEY,
+    day DATE NOT NULL,
+    person_key TEXT NOT NULL,
+    person_name TEXT,
+    entity_id INTEGER REFERENCES entities(id),
+    os_person_id TEXT,
+    channels JSONB DEFAULT '[]',
+    event_ids JSONB DEFAULT '[]',
+    fingerprint TEXT,
+    data JSONB DEFAULT '{}',
+    first_message_at TIMESTAMPTZ,
+    generated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(day, person_key)
+);
+CREATE INDEX IF NOT EXISTS idx_team_updates_day ON team_updates(day);
+CREATE INDEX IF NOT EXISTS idx_events_slack_channel ON events ((metadata->>'channel_id')) WHERE source = 'slack';
+
 -- OAuth tokens issued to MCP clients (stored hashed)
 CREATE TABLE IF NOT EXISTS oauth_tokens (
     token_hash TEXT PRIMARY KEY,
@@ -870,6 +889,13 @@ class Database:
             "ORDER BY message_count DESC"
         )
 
+    async def get_unmapped_slack_authors(self) -> list[dict]:
+        return await self._fetchall(
+            "SELECT metadata->>'user_name' AS sender_name, COUNT(*) AS message_count, MAX(timestamp) AS last_seen "
+            "FROM events WHERE source = 'slack' AND sender_entity_id IS NULL AND metadata->>'user_name' IS NOT NULL "
+            "GROUP BY 1 ORDER BY message_count DESC"
+        )
+
     async def get_whatsapp_sync_status(self) -> dict:
         """Get WhatsApp sync status for dashboard."""
         row = await self._fetchone(
@@ -956,6 +982,18 @@ class Database:
                 "UPDATE events SET sender_entity_id = $1 "
                 "WHERE source = 'whatsapp' AND sender_entity_id IS NULL "
                 "AND metadata->>'sender_name' = $2",
+                entity_id, alias_name,
+            )
+        elif source == "slack":
+            await self._execute(
+                "UPDATE events SET sender_entity_id = $1 "
+                "WHERE source = 'slack' AND sender_entity_id IS NULL "
+                "AND lower(metadata->>'user_name') = lower($2)",
+                entity_id, alias_name,
+            )
+            await self._execute(
+                "UPDATE team_updates SET entity_id = $1, fingerprint = NULL "
+                "WHERE entity_id IS NULL AND lower(person_name) = lower($2)",
                 entity_id, alias_name,
             )
         elif source == "asana":
@@ -1289,6 +1327,90 @@ class Database:
             "AND COALESCE(last_activity_at, created_at) < NOW() - make_interval(days => $1)",
             days,
         )
+
+    # =========================================================================
+    # Slack + team daily updates
+    # =========================================================================
+
+    async def get_slack_last_ts(self) -> dict[str, str]:
+        """Newest stored top-level message ts per channel — the Slack ingestor resumes from here."""
+        rows = await self._fetchall(
+            "SELECT metadata->>'channel_id' AS ch, MAX((metadata->>'ts')::numeric)::text AS ts "
+            "FROM events WHERE source = 'slack' AND NOT COALESCE((metadata->>'is_reply')::boolean, false) GROUP BY 1"
+        )
+        return {r["ch"]: r["ts"] for r in rows if r["ch"]}
+
+    async def get_slack_messages(self, start: datetime, end: datetime, channel_ids: list[str] | None = None) -> list[dict]:
+        rows = await self._fetchall(
+            "SELECT id, timestamp, body, sender_entity_id, metadata FROM events "
+            "WHERE source = 'slack' AND timestamp >= $1 AND timestamp < $2 "
+            "AND ($3::text[] IS NULL OR metadata->>'channel_id' = ANY($3::text[])) "
+            "ORDER BY timestamp",
+            start, end, channel_ids,
+        )
+        for r in rows:
+            r["metadata"] = _j(r.get("metadata"), {})
+        return rows
+
+    async def get_slack_reporters(self, since: datetime, channel_ids: list[str]) -> list[dict]:
+        """People who post in daily channels: user id, name, number of report days."""
+        if not channel_ids:
+            return []
+        return await self._fetchall(
+            "SELECT metadata->>'user_id' AS user_id, MAX(metadata->>'user_name') AS user_name, "
+            "COUNT(DISTINCT (timestamp AT TIME ZONE 'Europe/Warsaw')::date) AS days, MAX(timestamp) AS last_at "
+            "FROM events WHERE source = 'slack' AND timestamp >= $1 AND metadata->>'channel_id' = ANY($2::text[]) "
+            "AND NOT COALESCE((metadata->>'is_reply')::boolean, false) GROUP BY 1",
+            since, channel_ids,
+        )
+
+    async def get_entity(self, entity_id: int) -> dict | None:
+        row = await self._fetchone("SELECT * FROM entities WHERE id = $1", entity_id)
+        if row:
+            row["metadata"] = _j(row.get("metadata"), {})
+        return row
+
+    async def get_team_update_fps(self, day: date) -> dict[str, str]:
+        rows = await self._fetchall("SELECT person_key, fingerprint FROM team_updates WHERE day = $1", day)
+        return {r["person_key"]: r["fingerprint"] for r in rows}
+
+    async def upsert_team_update(self, u: dict) -> None:
+        await self._execute(
+            "INSERT INTO team_updates (day, person_key, person_name, entity_id, os_person_id, channels, event_ids, "
+            "fingerprint, data, first_message_at, generated_at) "
+            "VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9::jsonb, $10, NOW()) "
+            "ON CONFLICT (day, person_key) DO UPDATE SET person_name = EXCLUDED.person_name, "
+            "entity_id = EXCLUDED.entity_id, os_person_id = EXCLUDED.os_person_id, channels = EXCLUDED.channels, "
+            "event_ids = EXCLUDED.event_ids, fingerprint = EXCLUDED.fingerprint, data = EXCLUDED.data, "
+            "first_message_at = EXCLUDED.first_message_at, generated_at = NOW()",
+            u["day"], u["person_key"], u.get("person_name"), u.get("entity_id"), u.get("os_person_id"),
+            json.dumps(u.get("channels") or []), json.dumps(u.get("event_ids") or []), u.get("fingerprint"),
+            json.dumps(u.get("data") or {}, default=str), u.get("first_message_at"),
+        )
+
+    async def get_slack_channel_stats(self, days: int = 7) -> dict[str, dict]:
+        rows = await self._fetchall(
+            "SELECT metadata->>'channel_id' AS ch, COUNT(*) AS n, MAX(timestamp) AS last_at FROM events "
+            "WHERE source = 'slack' AND timestamp > NOW() - make_interval(days => $1) GROUP BY 1",
+            days,
+        )
+        return {r["ch"]: r for r in rows if r["ch"]}
+
+    async def set_team_update_data(self, day: date, person_key: str, data: dict) -> None:
+        await self._execute(
+            "UPDATE team_updates SET data = $3::jsonb WHERE day = $1 AND person_key = $2",
+            day, person_key, json.dumps(data, default=str),
+        )
+
+    async def get_team_updates(self, start: date, end: date) -> list[dict]:
+        rows = await self._fetchall(
+            "SELECT * FROM team_updates WHERE day >= $1 AND day <= $2 ORDER BY day DESC, person_name",
+            start, end,
+        )
+        for r in rows:
+            r["data"] = _j(r.get("data"), {})
+            r["channels"] = _j(r.get("channels"), [])
+        return rows
 
 
 def _j(value, default=None):

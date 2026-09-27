@@ -69,6 +69,35 @@ async def calendar_sync(db: Database | None = None) -> dict | None:
     return await _logged(db, "calendar_sync", CalendarIngestor(db, load_config()).sync(days_ahead=10))
 
 
+async def slack_sync(db: Database | None = None) -> dict | None:
+    from src.ingestion.slack_ingest import SlackIngestor
+
+    if db is None:
+        async with database() as db:
+            return await slack_sync(db)
+    return await _logged(db, "slack_sync", SlackIngestor(db).sync())
+
+
+async def team_updates(db: Database | None = None, day=None, force: bool = False) -> dict | None:
+    """AI read of the team's daily Slack reports — today and the previous workday (late posts)."""
+    from src.ai.client import AIClient
+    from src.processing.team_updates import TeamUpdates, last_workday
+
+    if db is None:
+        async with database() as db:
+            return await team_updates(db, day, force)
+
+    async def both():
+        tu = TeamUpdates(db, AIClient(db=db))
+        if day is not None:
+            return await tu.run(day, force=force)
+        prev = await tu.run(last_workday(today()), force=force)
+        cur = await tu.run(today(), force=force)
+        return {"today": cur, "previous_workday": prev, **({"skipped": cur["skipped"]} if "skipped" in cur else {})}
+
+    return await _logged(db, "team_updates", both())
+
+
 async def ideaerp_sync(db: Database | None = None) -> dict | None:
     from src.ingestion.ideaerp_ingest import IdeaERPMetricsIngestor
 
@@ -193,5 +222,7 @@ JOBS = {
     "os_people_sync": ("Ludzie z MyBed OS", os_people_sync),
     "chat_digests": ("Streszczenia czatów", chat_digests),
     "topic_extraction": ("Wątki przekrojowe", topic_extraction),
+    "slack_sync": ("Synchronizacja Slack", slack_sync),
+    "team_updates": ("Raporty dnia zespołu (AI)", team_updates),
     "whatsapp_watchdog": ("Alarm: WhatsApp rozłączony", whatsapp_watchdog),
 }

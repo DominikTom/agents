@@ -54,3 +54,60 @@
 {% if level == "high" %}<span class="badge bg-red-50 text-red-700">Ważne</span>
 {% elif level == "low" %}<span class="badge bg-surface-2 text-ink-faint">Mało istotne</span>{% endif %}
 {%- endmacro %}
+
+
+{# KPI block of a report (meta.kpi) — same structure as the e-mail version in src/reports/kpi.py #}
+{% macro kpi_block(kpi) -%}
+{%- set tone_cls = {"good": "bg-emerald-50 text-emerald-700", "bad": "bg-red-50 text-red-700", "neutral": "bg-surface-2 text-ink-muted"} -%}
+{%- set tone_txt = {"good": "text-emerald-700", "bad": "text-red-700", "neutral": "text-ink-muted"} -%}
+{%- set first = kpi.periods[0] -%}
+<section class="kpi-block space-y-4">
+  <div class="flex flex-wrap items-baseline gap-x-2">
+    <h3 class="section-title">Liczby</h3>
+    <span class="text-xs text-ink-faint">{{ first.label|lower }} {{ first.range }} vs {{ first.prev_range }}</span>
+  </div>
+  <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+    {% for c in kpi_cards(kpi) %}
+    <div class="rounded-xl border border-line bg-canvas/70 px-3.5 py-3">
+      <div class="text-xs font-medium text-ink-muted">{{ c.label }}</div>
+      <div class="mt-1 font-mono text-lg font-semibold tabular-nums text-ink sm:text-xl">{{ c.value }}</div>
+      {% if c.has_pct %}<span class="mt-1.5 inline-flex rounded-md px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums {{ tone_cls[c.tone] }}">{{ c.pct }}</span>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% for t in kpi_tables(kpi) %}
+  <div>
+    <div class="mb-1.5 flex flex-wrap items-baseline gap-x-2">
+      <span class="text-sm font-semibold text-ink">{{ t.title }}</span>
+      <span class="text-xs text-ink-faint">{{ t.subtitle }}</span>
+    </div>
+    <div class="-mx-1 overflow-x-auto">
+      <table class="w-full min-w-[26rem] border-collapse text-[13px]">
+        <thead>
+          <tr class="border-b border-line">
+            <th class="py-1.5 pl-1 pr-3 text-left"></th>
+            {% for col in t.columns %}
+            <th class="whitespace-nowrap px-2 py-1.5 text-right text-xs font-medium text-ink-muted">{% for line in col.split("\n") %}{{ line }}{% if not loop.last %}<br><span class="font-normal text-ink-faint">{% endif %}{% endfor %}{% if col.split("\n")|length > 1 %}</span>{% endif %}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in t.rows %}
+          <tr class="border-b border-line last:border-0">
+            <td class="whitespace-nowrap py-2 pl-1 pr-3 text-xs font-medium text-ink-soft">{{ r.label }}{% if r.unit %} <span class="font-normal text-ink-faint">{{ r.unit }}</span>{% endif %}</td>
+            {% for c in r.cells %}
+            <td class="px-2 py-2 text-right align-top font-mono tabular-nums">
+              <div class="whitespace-nowrap text-ink">{{ c.value }}</div>
+              {% if c.pct %}<div class="whitespace-nowrap text-[11px] font-semibold {{ tone_txt[c.tone] }}">{{ c.pct }}</div>{% endif %}
+            </td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endfor %}
+  <p class="text-[11px] text-ink-faint">Liczone automatycznie z hurtowni dash (sprzedaż, Meta) i GA4 (Google Ads). Zmiana względem poprzedniego okresu o tej samej długości.</p>
+</section>
+{%- endmacro %}

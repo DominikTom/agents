@@ -249,6 +249,13 @@
   #root {
     height: 100%;
   }
+  /* Dynamic viewport height on mobile (address bar), falls back to 100% above */
+  @supports (height: 100dvh) {
+    html,
+    body {
+      height: 100dvh;
+    }
+  }
 
   body {
     @apply bg-canvas text-ink font-sans antialiased;
@@ -308,6 +315,10 @@
      (primary u góry-lewej, accent u dołu-prawej). W dark wyraźniejsze
      (granat na czerni), w light ledwie zauważalny, chłodny tint. */
   .app-ambient {
+    /* One static glow over the whole viewport — never tiles or scrolls with content */
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    background-size: 100% 100%;
     background-image:
       radial-gradient(ellipse 70% 55% at 12% -8%, rgb(var(--color-primary) / 0.08), transparent 65%),
       radial-gradient(ellipse 60% 50% at 102% 108%, rgb(var(--color-accent) / 0.06), transparent 65%);
@@ -477,6 +488,14 @@
     @apply border-b border-line px-2 py-1.5 font-mono tabular-nums;
   }
   .prose-report td:first-child {
+    @apply font-sans;
+  }
+  /* Numeric columns (class set in src/reports/render.py): right-aligned figures */
+  .prose-report th.num,
+  .prose-report td.num {
+    @apply text-right whitespace-nowrap;
+  }
+  .prose-report td:not(.num) {
     @apply font-sans;
   }
   .prose-report blockquote {

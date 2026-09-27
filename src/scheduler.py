@@ -24,6 +24,8 @@ DEFAULT_CRONS = {
     "os_people_sync": "15 */6 * * *",
     "chat_digests": "20 8-20 * * *",
     "topic_extraction": "40 15 * * mon-fri",
+    "slack_sync": "*/10 * * * *",
+    "team_updates": "50 8,12,16,17,18,19 * * mon-fri",
 }
 
 

@@ -109,17 +109,20 @@ SOURCES = [
     ("whatsapp", "WhatsApp", "message-circle", 3),
     ("gmail", "Gmail", "mail", 3),
     ("calendar", "Kalendarz Google", "calendar", 6),
+    ("slack", "Slack", "hash", 24),
 ]
 
 
 async def sources_health(db: Database) -> list[dict]:
     stats = {s["source"]: s for s in await db.get_ingestion_stats()}
-    runs = await db.get_last_run_any(["whatsapp_sync", "gmail_sync", "calendar_sync", "ideaerp_sync", "os_people_sync", "chat_digests"])
+    runs = await db.get_last_run_any(["whatsapp_sync", "gmail_sync", "calendar_sync", "slack_sync", "ideaerp_sync",
+                                      "os_people_sync", "chat_digests"])
     out = []
     for key, label, icon, max_age in SOURCES:
         s = stats.get(key, {})
         last = s.get("last_event")
-        run = runs.get({"whatsapp": "whatsapp_sync", "gmail": "gmail_sync", "calendar": "calendar_sync"}[key])
+        run = runs.get({"whatsapp": "whatsapp_sync", "gmail": "gmail_sync", "calendar": "calendar_sync",
+                        "slack": "slack_sync"}[key])
         if run and run["status"] == "error":
             state = "error"
         elif not last:

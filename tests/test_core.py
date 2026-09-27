@@ -48,7 +48,7 @@ def test_profiles_merge_keeps_user_choices_and_adds_new_sections():
     assert mb["sections"][0] == {"key": "sales", "enabled": True, "note": "x"}
     keys = [s["key"] for s in mb["sections"]]
     assert "bogus" not in keys and set(keys) == set(SECTION_CATALOG)
-    assert all(not s["enabled"] for s in mb["sections"][1:])
+    assert all(not s["enabled"] for s in mb["sections"][1:] if not SECTION_CATALOG[s["key"]].get("auto_enable"))
     assert set(merged) == set(DEFAULT_PROFILES)
 
 
@@ -138,7 +138,7 @@ def test_commitment_fingerprint_ignores_word_order_and_punctuation():
 
 
 def test_kpi_periods_and_table():
-    from src.reports.kpi import render_kpi
+    from src.reports.kpi import headline_cards, kpi_data, kpi_email_html, kpi_markdown, render_kpi, tables
 
     ref = date(2026, 9, 22)
     rows = [{"date": (ref - timedelta(days=i)).isoformat(), "source_shop": "mybed.pl", "orders_count": 1,
@@ -152,8 +152,71 @@ def test_kpi_periods_and_table():
     total = week["rows"][0]
     assert total["revenue"]["v"] == 1400 and total["revenue"]["pct"] == 100.0
     assert total["spend_google"]["v"] == 70 and total["spend_meta"]["v"] == 0
-    md = render_kpi(o, {"enabled": True, "periods": ["1", "7"], "metrics": ["revenue", "spend_total"], "per_shop": True})
-    assert "## Liczby" in md and "1 400 zł (+100,0%)" in md and "16.09–22.09 (vs 09.09–15.09)" in md
-    assert render_kpi(o, {"enabled": False, "periods": ["7"], "metrics": ["revenue"]}) == ""
-    flat = render_kpi(o, {"enabled": True, "periods": ["30"], "metrics": ["orders"], "per_shop": False})
-    assert "| Ostatnie 30 dni (24.08–22.09) | 30 (±0,0%) |" in flat
+
+    cfg = {"enabled": True, "periods": ["1", "7"], "metrics": ["revenue", "orders", "spend_total"], "per_shop": True}
+    data = kpi_data(o, cfg)
+    assert [p["key"] for p in data["periods"]] == ["1", "7"] and data["as_of"] == "2026-09-22"
+    cards = headline_cards(data)
+    assert [c["label"] for c in cards] == ["Przychód", "Zamówienia", "Reklamy razem"]
+    assert cards[0]["tone"] == "neutral"  # yesterday = day before → ±0
+    week_cards = headline_cards(kpi_data(o, {**cfg, "periods": ["7"]}))
+    assert week_cards[0]["tone"] == "good" and week_cards[2]["tone"] == "neutral"  # spend deltas are never red/green
+    t7 = tables(data)[1]
+    assert t7["columns"] == ["Razem", "mybed.pl", "mybed.de", "MittoHome"]  # rows = metrics, columns = shops
+    assert t7["rows"][0]["cells"][0]["value"] == "1\u00a0400" and t7["rows"][0]["cells"][0]["pct"] == "+100,0%"
+    assert t7["rows"][0]["unit"] == "zł" and t7["rows"][1]["unit"] == ""
+
+    md = render_kpi(o, cfg)
+    assert "## Liczby" in md and "| Przychód (zł) | 1 400 (+100,0%)" in md and "16.09–22.09 vs 09.09–15.09" in md
+    assert kpi_markdown(kpi_data(o, {**cfg, "enabled": False})) == ""
+    flat = kpi_markdown(kpi_data(o, {"enabled": True, "periods": ["30"], "metrics": ["orders"], "per_shop": False}))
+    assert "| Zamówienia | 30 (±0,0%) |" in flat
+
+    mail = kpi_email_html(data)
+    assert "#047857" in mail and "1\u00a0400" in mail and "<script" not in mail
+
+
+def test_email_template_numeric_cells_and_escaping():
+    from src.reports.render import email_html, to_html
+
+    body = to_html("| Sklep | Zam. |\n|---|---|\n| mybed.pl | **52** |\n\n<script>alert(1)</script>")
+    mail = email_html(label="Raport", title="T <b>", body_html=body, url=None, footer="f", lead="Lead & co",
+                      kpi_html="", sources="WhatsApp, Gmail")
+    assert "text-align:right" in mail and "text-align:left" in mail
+    assert mail.index("Zam.") > mail.index("text-align:right")  # numeric column header aligned with its numbers
+    assert "<script>" not in mail and "T &lt;b&gt;" in mail and "Lead &amp; co" in mail
+    assert "Źródła:" in mail
+
+
+def test_new_auto_enabled_section_lands_next_to_its_neighbour():
+    stored = {"morning_briefing": {"sections": [
+        {"key": k, "enabled": True, "note": ""} for k in ["top", "awaiting", "calendar", "sales", "marketing", "chats", "commitments"]
+    ]}}
+    keys = [s["key"] for s in merge_profiles(stored)["morning_briefing"]["sections"]]
+    enabled = {s["key"]: s["enabled"] for s in merge_profiles(stored)["morning_briefing"]["sections"]}
+    assert keys.index("team_updates") == keys.index("chats") + 1 and enabled["team_updates"]
+    assert not enabled["projects"]  # regular new sections stay off
+
+
+def test_slack_chunks_keep_code_fences_balanced():
+    from src.outputs.slack_output import _chunks, md_to_slack
+
+    text = md_to_slack("## A\n\n| a | b |\n|---|---|\n" + "| x | 1 |\n" * 400)
+    parts = _chunks(text, 1000)
+    assert len(parts) > 1 and all(p.count("```") % 2 == 0 for p in parts)
+
+
+def test_team_updates_last_workday():
+    from src.processing.team_updates import last_workday
+
+    assert last_workday(date(2026, 9, 28)) == date(2026, 9, 25)  # Monday → Friday
+    assert last_workday(date(2026, 9, 24)) == date(2026, 9, 23)
+
+
+def test_lineage_sources_line():
+    from src.reports.lineage import SECTION_SOURCES, SOURCES, sources_line
+
+    assert set(SECTION_SOURCES) == set(SECTION_CATALOG)
+    assert all(src == "ai" or src in SOURCES for srcs in SECTION_SOURCES.values() for src in srcs)
+    line = sources_line(["top", "sales", "chats", "team_updates"], "2026-09-22")
+    assert line.startswith("Hurtownia dash, IdeaERP, WhatsApp, Slack, MyBed Group OS") and line.endswith("liczby do 22.09")

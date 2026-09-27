@@ -93,6 +93,8 @@ document.addEventListener('click', async (e) => {
   try {
     const fd = new FormData()
     if (btn.dataset.deliver) fd.append('deliver', btn.dataset.deliver)
+    // data-params="day=2026-09-26&x=1" → extra form fields
+    for (const [k, v] of new URLSearchParams(btn.dataset.params || '')) fd.append(k, v)
     await post(btn.dataset.run, fd)
     toast(btn.dataset.msg || 'Uruchomiono w tle', 'success')
     if (btn.dataset.reload) setTimeout(() => location.reload(), Number(btn.dataset.reload))

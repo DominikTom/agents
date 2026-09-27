@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -98,6 +98,15 @@ templates.env.filters.update({
     "j": lambda v: _j(v, {}),
     "avatar_key": lambda s: sum(ord(c) for c in (s or "")) % 9,
 })
+
+
+def _kpi_helpers():
+    from src.reports.kpi import headline_cards, tables
+
+    return {"kpi_cards": headline_cards, "kpi_tables": tables}
+
+
+templates.env.globals.update(_kpi_helpers())
 templates.env.globals.update({"now": now, "today": today})
 
 NAV = [
@@ -110,9 +119,11 @@ NAV = [
         ("/chats", "Rozmowy", "message-circle", "chats"),
         ("/commitments", "Zobowiązania", "square-check", "commitments"),
         ("/topics", "Wątki", "waypoints", "topics"),
+        ("/team", "Zespół", "users-round", "team"),
     ]),
     ("System", [
         ("/sources", "Źródła danych", "plug", "sources"),
+        ("/sources/lineage", "Skąd dane", "workflow", "lineage"),
         ("/people", "Ludzie", "users", "people"),
         ("/system", "System", "activity", "system"),
     ]),
@@ -220,13 +231,14 @@ async def report_detail_page(request: Request, report_id: int):
     report = await db.get_report(report_id)
     if not report:
         return RedirectResponse("/reports", status_code=302)
-    if not report.get("html"):
-        from src.reports.render import to_html
-        report["html"] = to_html(report["body"])
-    from src.reports.profiles import SECTION_CATALOG
+    from src.reports.render import _mark_numeric_columns, to_html
 
+    report["html"] = _mark_numeric_columns(report.get("html") or to_html(report["body"]))
+    from src.reports.profiles import SECTION_CATALOG, load_profiles
+
+    profile = (await load_profiles(db)).get(report["agent_name"]) or {}
     return render(request, "report_detail.html", "reports", report=report, meta=data.parse_meta(report),
-                  labels=REPORT_KEYS, catalog=SECTION_CATALOG)
+                  labels=REPORT_KEYS, catalog=SECTION_CATALOG, slack_channel=(profile.get("slack_channel") or "").strip())
 
 
 @app.post("/api/reports/{key}/run")
@@ -264,7 +276,7 @@ async def resend_report(request: Request, report_id: int):
     profile = {**profile, "email": True, "slack_channel": ""}
     delivered = await ReportEngine(db).deliver(
         report_id, profile, await load_general(db), report.get("title") or "Raport",
-        report.get("summary") or "", report["body"], report.get("html") or "",
+        report.get("summary") or "", report["body"], report.get("html") or "", meta=data.parse_meta(report),
     )
     if "email_error" in delivered:
         return JSONResponse({"error": delivered["email_error"]}, status_code=400)
@@ -622,6 +634,223 @@ async def run_job(request: Request, name: str):
     return {"status": "started"}
 
 
+# ─── Slack ───────────────────────────────────────────────────────────────────
+
+
+@app.get("/sources/slack", response_class=HTMLResponse)
+async def slack_page(request: Request):
+    if not authed(request):
+        return login_redirect(request)
+    from src.connectors.slack_api import OPTIONAL_SCOPES, REQUIRED_SCOPES, SUGGESTED_DAILY, SlackAPI, SlackError
+    from src.ingestion.slack_ingest import load_channel_settings, refresh_channels
+    from src.reports.profiles import load_profiles
+
+    db = get_db_sync()
+    api = SlackAPI()
+    identity, error = None, None
+    channels = await load_channel_settings(db)
+    if api.configured:
+        try:
+            identity = await api.identity()
+            channels = await refresh_channels(db, api)
+        except SlackError as e:
+            error = str(e)
+    scopes = set((identity or {}).get("scopes") or [])
+    missing = [(k, v) for k, v in REQUIRED_SCOPES.items() if scopes and k not in scopes]
+    joined = {c.get("name") for c in channels.values() if c.get("member")}
+    profiles = await load_profiles(db)
+    return render(
+        request, "slack.html", "sources",
+        configured=api.configured, identity=identity, error=error, missing_scopes=missing,
+        optional_missing=[(k, v) for k, v in OPTIONAL_SCOPES.items() if scopes and k not in scopes],
+        channels=sorted(channels.items(), key=lambda kv: (not kv[1].get("member"), not kv[1].get("daily"), kv[1].get("name") or "")),
+        invite=[n for n in SUGGESTED_DAILY if n not in joined],
+        stats=await db.get_slack_channel_stats(7),
+        run=(await db.get_last_run_any(["slack_sync"])).get("slack_sync"),
+        targets=[(p["name"], p["slack_channel"]) for p in profiles.values() if (p.get("slack_channel") or "").strip()],
+        required=REQUIRED_SCOPES,
+    )
+
+
+@app.post("/api/slack/channel")
+async def slack_channel_toggle(request: Request, channel_id: str = Form(...), field: str = Form(...), value: str = Form("")):
+    if not authed(request):
+        return unauthorized()
+    if field not in ("read", "daily"):
+        return JSONResponse({"error": "bad field"}, status_code=400)
+    db = get_db_sync()
+    stored = await db.get_setting("slack", {}) or {}
+    channels = dict(stored.get("channels") or {})
+    if channel_id not in channels:
+        return JSONResponse({"error": "Nieznany kanał — odśwież stronę"}, status_code=404)
+    on = value in ("on", "true", "1")
+    channels[channel_id][field] = on
+    if field == "daily" and on:
+        channels[channel_id]["read"] = True
+    await db.set_setting("slack", {**stored, "channels": channels})
+    return {"status": "ok", "channel": channels[channel_id]}
+
+
+@app.post("/api/slack/test")
+async def slack_test(request: Request, target: str = Form("")):
+    if not authed(request):
+        return unauthorized()
+    from src.connectors.slack_api import SlackError
+    from src.outputs.slack_output import post_text
+
+    target = target.strip()
+    if not target:
+        return JSONResponse({"error": "Podaj kanał (#nazwa) albo identyfikator (U…/C…)"}, status_code=400)
+    try:
+        await post_text(target, "✅ Test z MyBed Agents — raporty ustawione na ten kanał będą przychodzić tutaj.")
+    except SlackError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return {"status": "sent", "target": target}
+
+
+@app.post("/api/reports/{report_id}/slack")
+async def report_to_slack(request: Request, report_id: int):
+    if not authed(request):
+        return unauthorized()
+    from src.reports.engine import ReportEngine
+    from src.reports.profiles import load_general, load_profiles
+
+    db = get_db_sync()
+    report = await db.get_report(report_id)
+    if not report:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    profiles = await load_profiles(db)
+    profile = profiles.get(report["agent_name"]) or {}
+    if not (profile.get("slack_channel") or "").strip():
+        return JSONResponse({"error": "Ten raport nie ma kanału Slack — ustaw go w Studio raportów"}, status_code=400)
+    delivered = await ReportEngine(db).deliver(
+        report_id, {**profile, "email": False}, await load_general(db), report.get("title") or "Raport",
+        report.get("summary") or "", report["body"], report.get("html") or "", meta=data.parse_meta(report),
+    )
+    if "slack_error" in delivered:
+        return JSONResponse({"error": delivered["slack_error"]}, status_code=400)
+    return {"status": "sent", "channel": delivered.get("slack")}
+
+
+# ─── Team (daily reports from Slack) ─────────────────────────────────────────
+
+
+@app.get("/team", response_class=HTMLResponse)
+async def team_page(request: Request, day: str | None = None):
+    if not authed(request):
+        return login_redirect(request)
+    from src.processing.team_updates import last_workday, team_overview
+    from src.reports.profiles import load_general
+
+    db = get_db_sync()
+    t = today()
+    try:
+        d = date.fromisoformat(day) if day else None
+    except ValueError:
+        d = None
+    if d is None:
+        d = t if (await db.get_team_updates(t, t)) else last_workday(t) if t.weekday() >= 5 or now().hour < 15 else t
+    overview = await team_overview(db, d)
+    prev_d = last_workday(d)
+    next_d = d + timedelta(days=1)
+    while next_d.weekday() >= 5:
+        next_d += timedelta(days=1)
+    general = await load_general(db)
+    run = (await db.get_last_run_any(["team_updates"])).get("team_updates")
+    return render(request, "team.html", "team", o=overview, day=d, prev_day=prev_d,
+                  next_day=next_d if next_d <= t else None, run=run,
+                  can_suggest=bool(general.get("push_to_os_suggestions")), config=data.config_status())
+
+
+@app.post("/api/team/analyze")
+async def team_analyze(request: Request, day: str = Form(...)):
+    if not authed(request):
+        return unauthorized()
+    from src import jobs
+
+    try:
+        d = date.fromisoformat(day)
+    except ValueError:
+        return JSONResponse({"error": "zła data"}, status_code=400)
+
+    async def go():
+        db = get_db_sync()
+        await jobs.slack_sync(db)
+        await jobs.team_updates(db, d, force=True)
+
+    spawn(go())
+    return {"status": "started"}
+
+
+@app.post("/api/team/suggest")
+async def team_suggest(request: Request, day: str = Form(...), person_key: str = Form(...),
+                       kind: str = Form(...), index: int = Form(...)):
+    """CEO-approved: send one suggestion from a daily report to MyBed OS as an AI proposal."""
+    if not authed(request):
+        return unauthorized()
+    from src.connectors.os_mybed import OSClient
+    from src.reports.profiles import load_general
+
+    db = get_db_sync()
+    general = await load_general(db)
+    if not general.get("push_to_os_suggestions"):
+        return JSONResponse({"error": "Propozycje AI w OS są wyłączone (Studio → O mnie i ustawienia)"}, status_code=400)
+    try:
+        d = date.fromisoformat(day)
+    except ValueError:
+        return JSONResponse({"error": "zła data"}, status_code=400)
+    rows = [u for u in await db.get_team_updates(d, d) if u["person_key"] == person_key]
+    if not rows:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    u = rows[0]
+    payload = u["data"] or {}
+    items = payload.get("os_updates" if kind == "os_update" else "not_in_os") or []
+    if kind not in ("os_update", "not_in_os") or not 0 <= index < len(items):
+        return JSONResponse({"error": "bad item"}, status_code=400)
+    item = items[index]
+    who = u.get("person_name") or ""
+    if kind == "os_update":
+        title = f"{who}: „{item.get('title')}” → {item.get('suggested_status')}"
+        desc = (f"Z raportu dnia na Slacku ({fmt_date_pl(d)}): {item.get('note') or ''}\n"
+                f"Status w OS: {item.get('current_status')}. Zadanie: {item.get('link') or ''}")
+    else:
+        title = f"Nowe zadanie dla {who}: {item.get('title')}"
+        desc = (f"Praca z raportu dnia na Slacku ({fmt_date_pl(d)}), której nie ma w OS.\n"
+                f"Projekt: {item.get('project') or '—'}. {item.get('why') or ''}")
+    client = OSClient()
+    if not client.configured:
+        return JSONResponse({"error": "MyBed OS nie jest skonfigurowany"}, status_code=400)
+    try:
+        ref = await client.create_suggestion(title, desc + "\nDodane z panelu MyBed Agents.", f"Raport dnia: {who}", "slack")
+    except Exception as e:
+        return JSONResponse({"error": str(e)[:300]}, status_code=502)
+    pushed = set(payload.get("pushed") or [])
+    pushed.add(f"{kind}:{index}")
+    payload["pushed"] = sorted(pushed)
+    await db.set_team_update_data(d, person_key, payload)
+    return {"status": "created", "ref": ref}
+
+
+# ─── Data lineage ────────────────────────────────────────────────────────────
+
+
+@app.get("/sources/lineage", response_class=HTMLResponse)
+async def lineage_page(request: Request):
+    if not authed(request):
+        return login_redirect(request)
+    from src.reports.lineage import AI_STEPS, SECTION_SOURCES, SOURCES
+    from src.reports.profiles import SECTION_CATALOG, load_profiles
+
+    db = get_db_sync()
+    health = {h["key"]: h for h in await data.sources_health(db)}
+    jobs_ = [s["job"] for s in SOURCES.values() if s.get("job")] + ["chat_digests", "team_updates", "topic_extraction"]
+    runs = await db.get_last_run_any(jobs_)
+    profiles = await load_profiles(db)
+    return render(request, "lineage.html", "lineage", sources=SOURCES, section_sources=SECTION_SOURCES,
+                  catalog=SECTION_CATALOG, steps=AI_STEPS, health=health, runs=runs, profiles=profiles,
+                  config=data.config_status())
+
+
 # ─── People ──────────────────────────────────────────────────────────────────
 
 
@@ -637,7 +866,9 @@ async def people_page(request: Request):
             by_source.setdefault(a.get("source", "?"), []).append({"id": a.get("id"), "name": a.get("alias", "")})
         e["aliases_by_source"] = by_source
     unmapped = await db.get_unmapped_whatsapp_senders()
-    return render(request, "people.html", "people", entities=entity_map, unmapped=unmapped[:60])
+    unmapped_slack = await db.get_unmapped_slack_authors()
+    return render(request, "people.html", "people", entities=entity_map, unmapped=unmapped[:60],
+                  unmapped_slack=unmapped_slack[:40])
 
 
 @app.post("/api/entity/alias")
