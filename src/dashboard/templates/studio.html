@@ -90,6 +90,13 @@
           <input name="time" type="time" class="input font-mono" value="{{ profile.time }}">
         </div>
         <div class="sm:col-span-2">
+          <label class="label">Czekaj na dane z dasha do</label>
+          <div class="flex flex-wrap items-center gap-3">
+            <input name="wait_until" type="time" class="input w-36 font-mono" value="{{ profile.wait_until or '' }}">
+            <p class="min-w-0 flex-1 text-xs text-ink-muted">Dash wgrywa wczorajszą sprzedaż ok. 6:05, Metę o 7:00, a Google Ads (GA4) o 8:30. Jeśli o godzinie raportu czegoś brakuje, raport poczeka (sprawdza co 5 min) najdłużej do tej godziny i wtedy wyśle to, co jest. Puste = nie czekaj.</p>
+          </div>
+        </div>
+        <div class="sm:col-span-2">
           <label class="label">Dni</label>
           <div class="flex flex-wrap gap-1.5">
             {% for d in range(7) %}

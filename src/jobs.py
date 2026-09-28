@@ -220,12 +220,60 @@ async def _notify(title: str, text: str) -> None:
             logger.warning(f"Alert e-mail failed: {e}")
 
 
-async def run_report(key: str, db: Database | None = None, deliver: bool = True) -> dict | None:
+DASH_SECTIONS = {"sales", "marketing", "showrooms"}
+DATA_CHECK_EVERY = 300  # s
+
+
+async def wait_for_dash(db: Database, key: str) -> dict:
+    """Scheduled runs only: hold the report until the dash warehouse has yesterday's sales, Meta and Google Ads,
+    at most until the report's "wait for data until" time (Studio). The dash ETL loads sales ~6:00, Meta 7:00
+    and GA4 8:30 — a 6:00 report would otherwise show "no data" for all of them."""
+    import asyncio
+    from datetime import datetime as _dt
+
+    from src.connectors.dash import DashClient
+    from src.reports.profiles import load_profiles
+
+    profile = (await load_profiles(db)).get(key) or {}
+    until = (profile.get("wait_until") or "").strip()
+    uses_dash = (profile.get("kpi") or {}).get("enabled") or any(
+        s.get("enabled") and s.get("key") in DASH_SECTIONS for s in profile.get("sections") or [])
+    client = DashClient()
+    if not until or not uses_dash or not client.configured:
+        return {}
+    try:
+        hh, mm = (int(x) for x in until.split(":"))
+    except ValueError:
+        return {}
+    current = now()
+    deadline = current.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    waited = 0
+    while True:
+        fresh = await client.freshness()
+        if all(fresh.values()) or now() >= deadline:
+            break
+        if waited == 0:
+            logger.info(f"Report {key}: waiting for dash data (until {until}): {fresh}")
+        await asyncio.sleep(min(DATA_CHECK_EVERY, max(1, (deadline - now()).total_seconds())))
+        waited += 1
+    if waited:
+        logger.info(f"Report {key}: dash data after {int((now() - current).total_seconds() // 60)} min: {fresh}")
+    return {"waited_min": int((now() - current).total_seconds() // 60), "fresh": fresh,
+            "checked_at": _dt.now().isoformat(timespec="minutes")}
+
+
+async def run_report(key: str, db: Database | None = None, deliver: bool = True,
+                     wait_for_data: bool = False) -> dict | None:
     from src.reports.engine import ReportEngine
 
     if db is None:
         async with database() as db:
-            return await run_report(key, db, deliver)
+            return await run_report(key, db, deliver, wait_for_data)
+    if wait_for_data:
+        try:
+            await wait_for_dash(db, key)
+        except Exception as e:
+            logger.warning(f"Report {key}: dash readiness check failed ({e}) — generating now")
     try:
         return await ReportEngine(db).run(key, deliver=deliver)
     except Exception:

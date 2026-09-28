@@ -78,6 +78,7 @@ class AgentsScheduler:
                 continue
             hour, minute = (p.get("time") or "07:00").split(":")
             trigger = CronTrigger(hour=int(hour), minute=int(minute), day_of_week=_dow(p["days"]), timezone=TZ)
-            self.scheduler.add_job(jobs.run_report, trigger=trigger, args=[key], id=job_id, name=p.get("name", key),
+            self.scheduler.add_job(jobs.run_report, trigger=trigger, args=[key], kwargs={"wait_for_data": True},
+                                   id=job_id, name=p.get("name", key),
                                    max_instances=1, coalesce=True, misfire_grace_time=1800)
             logger.info(f"Report {key}: {p.get('time')} dow={_dow(p['days'])}")

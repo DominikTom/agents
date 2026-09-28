@@ -154,6 +154,7 @@ DEFAULT_PROFILES: dict[str, dict] = {
         "kind": "morning",
         "enabled": True,
         "time": "07:00",
+        "wait_until": "09:00",
         "days": [0, 1, 2, 3, 4],
         "email": True,
         "slack_channel": "",
@@ -171,6 +172,7 @@ DEFAULT_PROFILES: dict[str, dict] = {
         "kind": "wrap",
         "enabled": True,
         "time": "16:00",
+        "wait_until": "",
         "days": [0, 1, 2, 3, 4],
         "email": True,
         "slack_channel": "",
@@ -188,6 +190,7 @@ DEFAULT_PROFILES: dict[str, dict] = {
         "kind": "weekly",
         "enabled": True,
         "time": "15:00",
+        "wait_until": "",
         "days": [4],
         "email": True,
         "slack_channel": "",
@@ -275,4 +278,5 @@ def schedule_label(p: dict) -> str:
         d = "codziennie"
     else:
         d = ", ".join(DAY_NAMES[i] for i in days)
-    return f"{d}, {p.get('time', '')}"
+    wait = f" (czeka na dane do {p['wait_until']})" if p.get("wait_until") else ""
+    return f"{d}, {p.get('time', '')}{wait}"

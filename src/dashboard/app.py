@@ -335,6 +335,8 @@ def _profile_from_form(form, base: dict) -> dict:
     p = dict(base)
     p["enabled"] = form.get("enabled") == "on"
     p["time"] = (form.get("time") or base.get("time") or "07:00")[:5]
+    wait = (form.get("wait_until") or "").strip()[:5]
+    p["wait_until"] = wait if len(wait) == 5 and wait[2] == ":" and wait.replace(":", "").isdigit() else ""
     p["days"] = sorted({int(d) for d in form.getlist("days") if d.isdigit() and 0 <= int(d) <= 6})
     p["email"] = form.get("email") == "on"
     p["slack_channel"] = (form.get("slack_channel") or "").strip()

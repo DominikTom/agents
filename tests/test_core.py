@@ -453,3 +453,51 @@ def test_commitment_reconcile_applies_verdicts_safely():
     assert counts == {"done": 1, "obsolete": 0, "duplicate": 1} and db.checked[0] == [1, 2, 3, 4, 5]
     items_checked = [{**c, "checked_until": t0} for c in items]
     assert asyncio.run(CommitmentReconciler(DB(), AI())._chat("c1", items_checked)) is None  # nothing new
+
+
+def test_failed_ad_source_is_unknown_not_zero():
+    ref = date(2026, 9, 27)
+    rev = [{"date": ref.isoformat(), "source_shop": "mybed.pl", "orders_count": 10, "revenue_gross_pln": 30000,
+            "revenue_paid_pln": 30000, "avg_order_value_pln": 3000}]
+    google = [{"date": (ref - timedelta(days=i)).isoformat(), "shop": "mybed.pl", "platform": "google", "spend": 100.0}
+              for i in range(14)]
+    o = build_overview(rev, google, [], ref, missing={"meta"}, failed={"meta"})
+    row = o["periods"]["7"]["rows"][0]
+    assert row["spend_meta"]["v"] is None and row["spend_meta"]["prev"] is None
+    assert row["spend_total"]["v"] is None and row["spend_google"]["v"] == 700.0
+    assert all("Meta" not in r for r in o["marketing"]["per_sklep"])
+    assert o["marketing"]["per_sklep"][0]["suma_7_dni"] is None
+    assert "Meta — źródło nie odpowiedziało" in o["marketing"]["brak_danych"]
+
+
+def test_scheduled_report_waits_for_dash_until_deadline(monkeypatch):
+    import asyncio
+    from datetime import datetime
+
+    import src.connectors.dash as dash
+    import src.jobs as jobs
+    import src.reports.profiles as profiles
+    from src.common.timeutil import WARSAW
+
+    clock = [datetime(2026, 9, 28, 6, 0, tzinfo=WARSAW)]
+    answers = iter([{"sales": False, "meta": False, "google": False}, {"sales": True, "meta": False, "google": False},
+                    {"sales": True, "meta": True, "google": True}])
+
+    class Fake:
+        configured = True
+
+        async def freshness(self, ref=None):
+            return next(answers)
+
+    async def fake_profiles(db):
+        return {"morning_briefing": {"wait_until": "09:00", "kpi": {"enabled": True}, "sections": []}}
+
+    async def fake_sleep(sec):
+        clock[0] += timedelta(seconds=sec)
+
+    monkeypatch.setattr(dash, "DashClient", Fake)
+    monkeypatch.setattr(profiles, "load_profiles", fake_profiles)
+    monkeypatch.setattr(jobs, "now", lambda: clock[0])
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    out = asyncio.run(jobs.wait_for_dash(None, "morning_briefing"))
+    assert out["fresh"] == {"sales": True, "meta": True, "google": True} and out["waited_min"] == 10

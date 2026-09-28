@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from src.common.config import get_env_optional
 from src.common.timeutil import today, week_start
@@ -69,20 +69,53 @@ class DashClient:
             "and": f"(date.gte.{since.isoformat()},date.lte.{until.isoformat()})",
         })
 
+    async def freshness(self, ref: date | None = None) -> dict:
+        """Is yesterday (ref) already in the warehouse? The dash ETL loads sales ~6:00 (full rebuild of the
+        table, a few minutes), Meta at 7:00 and GA4/Google Ads at 8:30 — a report run before that has gaps."""
+        ref = (ref or (today() - timedelta(days=1))).isoformat()
+        one = {"select": "date", "date": f"eq.{ref}", "limit": "1"}
+
+        async def has(table: str, extra: dict | None = None) -> bool:
+            try:
+                return bool(await self.rest.select(table, {**one, **(extra or {})}, page_size=1, max_rows=1))
+            except Exception:
+                return False
+
+        async def sales_loading() -> bool:
+            try:
+                since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+                return bool(await self.rest.select("etl_log", {
+                    "select": "id", "source": "eq.gdrive_csv", "status": "eq.running",
+                    "started_at": f"gte.{since}", "limit": "1"}, page_size=1, max_rows=1))
+            except Exception:
+                return False
+
+        sales, meta, google, loading = await asyncio.gather(
+            has("fact_daily_revenue"), has("fact_daily_adspend"),
+            has("fact_daily_traffic", {"source": "eq.__total__"}), sales_loading())
+        return {"sales": sales and not loading, "meta": meta, "google": google}
+
     async def overview(self, ref: date | None = None) -> dict:
         """Numbers the reports need, all relative to `ref` (default: yesterday)."""
         ref = ref or (today() - timedelta(days=1))
         since = ref - timedelta(days=65)  # 2 × 30 days for period comparisons
-        rev, meta, google, rooms = await asyncio.gather(
-            self.revenue(since, ref), self.adspend(since, ref), self.google_cost(since, ref),
-            self.showrooms(since, ref),
-            return_exceptions=True,
-        )
+        calls = {"rev": lambda: self.revenue(since, ref), "meta": lambda: self.adspend(since, ref),
+                 "google": lambda: self.google_cost(since, ref), "rooms": lambda: self.showrooms(since, ref)}
+        got = dict(zip(calls, await asyncio.gather(*(c() for c in calls.values()), return_exceptions=True)))
+        for name, res in list(got.items()):
+            if isinstance(res, Exception):  # one retry: a timeout while the dash ETL rebuilds tables is common
+                await asyncio.sleep(3)
+                try:
+                    got[name] = await calls[name]()
+                except Exception as e:
+                    got[name] = e
+        rev, meta, google, rooms = got["rev"], got["meta"], got["google"], got["rooms"]
         if isinstance(rev, Exception):
             raise rev
         for name, res in (("Meta", meta), ("Google (GA4)", google), ("showroomy", rooms)):
             if isinstance(res, Exception):
                 logger.warning(f"dash: {name} unavailable: {res}")
+        failed = {k for k, res in (("meta", meta), ("google", google)) if isinstance(res, Exception)}
         ads = normalize_spend(
             [] if isinstance(meta, Exception) else meta,
             [] if isinstance(google, Exception) else google,
@@ -98,7 +131,8 @@ class DashClient:
         # late = no GA4 rows at all for ref; a real 0 zł day (paused campaigns, declined card) stays 0 zł
         if isinstance(google, Exception) or not any(g.get("date") == ref_iso for g in google):
             missing.add("google")
-        return build_overview(rev, ads, [] if isinstance(rooms, Exception) else rooms, ref, missing=missing)
+        return build_overview(rev, ads, [] if isinstance(rooms, Exception) else rooms, ref, missing=missing,
+                              failed=failed)
 
 
 def _f(v) -> float:
@@ -152,9 +186,13 @@ MISSING_METRICS = {
 
 
 def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref: date,
-                   missing: set[str] | None = None) -> dict:
-    missing = set(missing or ())
+                   missing: set[str] | None = None, failed: set[str] | None = None) -> dict:
+    """missing: no rows for `ref` (late) — the day is unknown. failed: the source did not answer at all —
+    every period is unknown (never shown as 0 zł)."""
+    failed = set(failed or ())
+    missing = set(missing or ()) | failed
     unknown = set().union(*(MISSING_METRICS[m] for m in missing)) if missing else set()
+    unknown_all = set().union(*(MISSING_METRICS[m] for m in failed)) if failed else set()
     by_day_shop: dict[tuple[str, str], dict] = {}
     for r in revenue:
         by_day_shop[(r["date"], r["source_shop"])] = r
@@ -279,7 +317,7 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
         for shop in [None] + MAIN_SHOPS:
             c, p = period_values(shop, cur_from, ref), period_values(shop, prev_from, prev_to)
             rows.append({"shop": shop or "Razem", **{
-                k: ({"v": None, "prev": p[k], "pct": None} if k in unknown else
+                k: ({"v": None, "prev": None if k in unknown_all else p[k], "pct": None} if k in unknown else
                     {"v": c[k], "prev": p[k], "pct": _pct(c[k], p[k]) if c[k] is not None and p[k] is not None else None})
                 for k in c
             }})
@@ -331,9 +369,12 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
             "spend_day": round(spend_y, 2),
             "spend_7d": spend7,
             "spend_7d_vs_prev_pct": _pct(spend7, spend_prev7),
-            "brak_danych": [MISSING_LABELS[m] for m in sorted(missing) if m != "sales"],
-            "per_sklep": by_shop,
-            "per_platforma": by_platform,
+            "brak_danych": [MISSING_LABELS[m] + (" — źródło nie odpowiedziało" if m in failed else "")
+                            for m in sorted(missing) if m != "sales"],
+            # a platform whose source failed has no numbers at all — leave it out rather than show 0 zł
+            "per_sklep": _without_platforms(by_shop, {PLATFORM_LABELS.get(f, f) for f in failed}),
+            "per_platforma": [r for r in by_platform
+                              if r["platforma"] not in {PLATFORM_LABELS.get(f, f) for f in failed}],
             "zrodla": "Meta: konta reklamowe per sklep (dash). Google Ads: koszt z GA4 per domena, mybed.de przeliczone z EUR na PLN.",
         },
         "showrooms": [
@@ -347,3 +388,15 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
         "missing_note": (f"Brak danych za {ref.strftime('%d.%m')}: " + ", ".join(MISSING_LABELS[m] for m in sorted(missing))
                          + " (hurtownia jeszcze się nie odświeżyła albo źródło nie odpowiedziało)") if missing else "",
     }
+
+
+def _without_platforms(rows: list[dict], labels: set[str]) -> list[dict]:
+    if not labels:
+        return rows
+    out = []
+    for r in rows:
+        r = {k: v for k, v in r.items() if k not in labels}
+        for k in ("suma_dzien", "suma_7_dni", "suma_7_dni_vs_poprz_pct"):
+            r[k] = None  # a sum without the failed platform would understate spend
+        out.append(r)
+    return out
