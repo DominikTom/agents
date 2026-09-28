@@ -89,6 +89,30 @@ async def test_connector(name: str, config: dict) -> None:
         print("  ", item)
 
 
+async def erp_check(day: str | None, config: dict) -> None:
+    """Sales of one day per shop from IdeaERP and from the dash warehouse, side by side (no order data printed)."""
+    from datetime import date as _date, timedelta as _td
+
+    from src.common.timeutil import today
+    from src.connectors.dash import DashClient
+    from src.connectors.ideaerp import erp_daily_sales
+
+    d = _date.fromisoformat(day) if day else today() - _td(days=1)
+    dash = DashClient()
+    dash_rows = await dash.revenue(d - _td(days=14), d) if dash.configured else []
+    rates = [float(r["revenue_gross_pln"]) / float(r["revenue_gross_original"]) for r in dash_rows
+             if r.get("original_currency") == "EUR" and float(r.get("revenue_gross_original") or 0)]
+    erp = await erp_daily_sales(d, config, sum(rates) / len(rates) if rates else 4.25)
+    print(f"Dzień {d} · sklepy w ERP: {erp['shops']} · pole z numerem zamówienia: {erp['ref_key']}")
+    by_erp = {r["source_shop"]: r for r in erp["rows"]}
+    by_dash = {r["source_shop"]: r for r in dash_rows if r.get("date") == d.isoformat()}
+    print(f"{'sklep':<16}{'ERP zam.':>10}{'ERP zł':>14}{'dash zam.':>11}{'dash zł':>14}")
+    for shop in sorted(set(by_erp) | set(by_dash)):
+        e, w = by_erp.get(shop, {}), by_dash.get(shop, {})
+        print(f"{shop:<16}{e.get('orders_count', '—'):>10}{round(e['revenue_gross_pln']) if e else '—':>14}"
+              f"{w.get('orders_count', '—'):>11}{round(float(w['revenue_gross_pln'])) if w else '—':>14}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="MyBed Agents")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -102,6 +126,8 @@ def main() -> None:
     run.add_argument("agent")
     test = sub.add_parser("test-connector", help="Test a live connector")
     test.add_argument("connector")
+    erp = sub.add_parser("erp-check", help="Compare a day's sales: IdeaERP vs dash (per shop)")
+    erp.add_argument("day", nargs="?", help="YYYY-MM-DD, default yesterday")
 
     args = parser.parse_args()
     config = load_config()
@@ -115,6 +141,8 @@ def main() -> None:
         asyncio.run(run_job(args.name))
     elif args.command == "test-connector":
         asyncio.run(test_connector(args.connector, config))
+    elif args.command == "erp-check":
+        asyncio.run(erp_check(args.day, config))
 
 
 if __name__ == "__main__":

@@ -87,6 +87,8 @@ async def build_sales(ctx: ReportContext) -> dict:
         out["dzien"] = d["date"]
         if "sales" in (d.get("missing") or []):
             out["brak_danych"] = d.get("missing_note")
+        elif d.get("sales_source") not in (None, "dash"):
+            out["zrodlo_wczoraj"] = d.get("missing_note")  # yesterday provisionally from the ERP
         out["razem"] = d["total"]
         out["sklepy"] = d["shops"]
         # "last 7 full days" (up to yesterday) is the main trend figure; Mon-to-date only in the weekly review

@@ -501,3 +501,31 @@ def test_scheduled_report_waits_for_dash_until_deadline(monkeypatch):
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
     out = asyncio.run(jobs.wait_for_dash(None, "morning_briefing"))
     assert out["fresh"] == {"sales": True, "meta": True, "google": True} and out["waited_min"] == 10
+
+
+def test_erp_orders_map_to_dash_shops():
+    from src.connectors.ideaerp import classify_order, order_total
+
+    assert classify_order({"name": "Shopify8133-1"}, "Cokolwiek") == "mittohome.pl"
+    assert classify_order({"name": "Shoper30015-2", "currency": "EUR"}, "X") == "mybed.de"
+    assert classify_order({"number": "Shoper61468-1"}, "X") == "mybed.pl"
+    assert classify_order({}, "Delta Industries sp. z o.o.") == "mybed.pl"
+    assert classify_order({"currency": "EUR"}, "Delta Industries") == "mybed.de"
+    assert classify_order({}, "All Good Things Sp z o o") == "inne"
+    assert order_total({"order_lines": [{"order_line_gross": "100.5"}, {"order_line_gross": 20}], "delivery_price": 9}) == 129.5
+
+
+def test_erp_fallback_marks_uncovered_shop_unknown():
+    ref = date(2026, 9, 27)
+    hist = [{"date": (ref - timedelta(days=i)).isoformat(), "source_shop": s, "orders_count": 10,
+             "revenue_gross_pln": 1000, "revenue_paid_pln": 1000, "avg_order_value_pln": 100}
+            for i in range(1, 15) for s in ("mybed.pl", "mittohome.pl")]
+    erp_rows = [{"date": ref.isoformat(), "source_shop": "mybed.pl", "orders_count": 65, "revenue_gross_pln": 203627,
+                 "revenue_paid_pln": 200000, "avg_order_value_pln": 3132}]
+    o = build_overview(hist + erp_rows, [], [], ref, sales_source="IdeaERP", unknown_shops={"mittohome.pl"})
+    rows = {r["shop"]: r for r in o["periods"]["1"]["rows"]}
+    assert rows["mybed.pl"]["revenue"]["v"] == 203627 and rows["mittohome.pl"]["revenue"]["v"] is None
+    assert rows["Razem"]["revenue"]["v"] is None and o["total"]["revenue"] is None
+    assert "wstępnie prosto z IdeaERP" in o["missing_note"] and "mittohome.pl" in o["missing_note"]
+    o2 = build_overview(hist + erp_rows, [], [], ref, sales_source="IdeaERP")
+    assert {r["shop"]: r for r in o2["periods"]["1"]["rows"]}["Razem"]["revenue"]["v"] == 203627

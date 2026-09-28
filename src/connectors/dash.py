@@ -131,8 +131,39 @@ class DashClient:
         # late = no GA4 rows at all for ref; a real 0 zł day (paused campaigns, declined card) stays 0 zł
         if isinstance(google, Exception) or not any(g.get("date") == ref_iso for g in google):
             missing.add("google")
+        sales_source, unknown_shops = None, set()
+        if "sales" in missing:
+            erp = await self._erp_sales(ref, rev)
+            if erp:
+                rev = [r for r in rev if r.get("date") != ref.isoformat()] + erp["rows"]
+                missing.discard("sales")
+                sales_source, unknown_shops = "IdeaERP", erp["unknown_shops"]
         return build_overview(rev, ads, [] if isinstance(rooms, Exception) else rooms, ref, missing=missing,
-                              failed=failed)
+                              failed=failed, sales_source=sales_source, unknown_shops=unknown_shops)
+
+    async def _erp_sales(self, ref: date, rev: list[dict]) -> dict | None:
+        """Yesterday's sales straight from IdeaERP while the dash has not loaded them yet. A main shop the ERP
+        does not return (while it normally sells every day) is marked unknown, never shown as 0."""
+        from src.common.config import load_config
+        from src.connectors.ideaerp import erp_daily_sales
+
+        rates = [_f(r["revenue_gross_pln"]) / _f(r["revenue_gross_original"]) for r in rev
+                 if r.get("original_currency") == "EUR" and _f(r.get("revenue_gross_original"))]
+        rate = sum(rates[-14:]) / len(rates[-14:]) if rates else 4.25
+        try:
+            erp = await erp_daily_sales(ref, load_config(), rate)
+        except Exception as e:
+            logger.warning(f"IdeaERP fallback for {ref}: {e}")
+            return None
+        got = {r["source_shop"] for r in erp["rows"] if r["orders_count"]}
+        week = [(ref - timedelta(days=i)).isoformat() for i in range(1, 8)]
+        usual = {s for s in MAIN_SHOPS
+                 if sum(int(r.get("orders_count") or 0) for r in rev if r.get("source_shop") == s and r.get("date") in week) >= 7}
+        unknown = usual - got
+        if unknown:
+            logger.info(f"IdeaERP fallback {ref}: no orders for {sorted(unknown)} (ERP shops: {erp['shops']}, "
+                        f"order number field: {erp['ref_key']})")
+        return {"rows": erp["rows"], "unknown_shops": unknown}
 
 
 def _f(v) -> float:
@@ -186,13 +217,17 @@ MISSING_METRICS = {
 
 
 def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref: date,
-                   missing: set[str] | None = None, failed: set[str] | None = None) -> dict:
+                   missing: set[str] | None = None, failed: set[str] | None = None,
+                   sales_source: str | None = None, unknown_shops: set[str] | None = None) -> dict:
     """missing: no rows for `ref` (late) — the day is unknown. failed: the source did not answer at all —
     every period is unknown (never shown as 0 zł)."""
     failed = set(failed or ())
     missing = set(missing or ()) | failed
     unknown = set().union(*(MISSING_METRICS[m] for m in missing)) if missing else set()
     unknown_all = set().union(*(MISSING_METRICS[m] for m in failed)) if failed else set()
+    # sales for ref came from the ERP but a shop is not there: that shop and the total are unknown (not smaller)
+    unknown_shops = set(unknown_shops or ())
+    shop_gap = MISSING_METRICS["sales"] if unknown_shops else set()
     by_day_shop: dict[tuple[str, str], dict] = {}
     for r in revenue:
         by_day_shop[(r["date"], r["source_shop"])] = r
@@ -316,8 +351,9 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
         rows = []
         for shop in [None] + MAIN_SHOPS:
             c, p = period_values(shop, cur_from, ref), period_values(shop, prev_from, prev_to)
+            gap = unknown | (shop_gap if (shop is None or shop in unknown_shops) else set())
             rows.append({"shop": shop or "Razem", **{
-                k: ({"v": None, "prev": None if k in unknown_all else p[k], "pct": None} if k in unknown else
+                k: ({"v": None, "prev": None if k in unknown_all else p[k], "pct": None} if k in gap else
                     {"v": c[k], "prev": p[k], "pct": _pct(c[k], p[k]) if c[k] is not None and p[k] is not None else None})
                 for k in c
             }})
@@ -358,6 +394,21 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
                                              "vs_prev_day_pct", "vs_same_weekday_pct")}} for sh in shops]
         week_to_date["vs_prev_week_pct"] = None
         last_7_days["vs_prev_7_pct"] = None
+    if unknown_shops:
+        total = {k: None for k in total}
+        shops = [{**sh, **{k: None for k in ("orders", "revenue_pln", "revenue_original", "aov_pln",
+                                             "vs_prev_day_pct", "vs_same_weekday_pct")}}
+                 if sh.get("shop") in unknown_shops else sh for sh in shops]
+        week_to_date["vs_prev_week_pct"] = None
+        last_7_days["vs_prev_7_pct"] = None
+    notes = []
+    if missing:
+        notes.append(f"Brak danych za {ref.strftime('%d.%m')}: " + ", ".join(MISSING_LABELS[m] for m in sorted(missing))
+                     + " (hurtownia jeszcze się nie odświeżyła albo źródło nie odpowiedziało)")
+    if sales_source:
+        notes.append(f"Sprzedaż za {ref.strftime('%d.%m')} wstępnie prosto z {sales_source} — dash jeszcze jej nie wgrał"
+                     + (f"; brak w ERP: {', '.join(sorted(unknown_shops))}, więc ten sklep i suma są nieznane"
+                        if unknown_shops else ""))
     return {
         "date": ref.isoformat(),
         "total": total,
@@ -385,8 +436,8 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
         "series": series,
         "periods": periods,
         "missing": sorted(missing),
-        "missing_note": (f"Brak danych za {ref.strftime('%d.%m')}: " + ", ".join(MISSING_LABELS[m] for m in sorted(missing))
-                         + " (hurtownia jeszcze się nie odświeżyła albo źródło nie odpowiedziało)") if missing else "",
+        "sales_source": sales_source or "dash",
+        "missing_note": ". ".join(notes),
     }
 
 

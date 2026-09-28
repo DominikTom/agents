@@ -206,3 +206,85 @@ class IdeaERPConnector(BaseConnector):
             "status_breakdown": dict(statuses),
             "avg_order_value": round(revenue / orders_count, 2) if orders_count else 0.0,
         }
+
+
+# ── Yesterday's sales straight from the ERP (fallback while the dash warehouse is not loaded yet) ──────────
+# The dash builds source_shop from the order number (Shopify… = mittohome.pl, Shoper… = mybed.pl / mybed.de by
+# currency, Amazon… = amazon.de); the same rule is applied here so both sources agree.
+REF_KEYS = ("name", "number", "order_number", "numer", "reference", "client_order_ref", "shop_order_number",
+            "external_number", "external_id", "origin")
+PREFIX_SHOP = (("shopify", "mittohome.pl"), ("amazon", "amazon.de"), ("nomo", "unknown"))
+
+
+def order_ref(order: dict) -> str:
+    for key in REF_KEYS:
+        value = order.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def classify_order(order: dict, shop_name: str) -> str:
+    """source_shop the way the dash names it."""
+    currency = (order.get("currency") or "PLN").upper()
+    ref = order_ref(order).lower()
+    for prefix, shop in PREFIX_SHOP:
+        if ref.startswith(prefix):
+            return shop
+    if ref.startswith("shoper") or shop_name.lower().startswith("delta industries"):
+        return "mybed.de" if currency == "EUR" else "mybed.pl"
+    return "inne"
+
+
+def order_total(order: dict) -> float:
+    total = sum(float(line.get("order_line_gross", 0) or 0) for line in (order.get("order_lines") or []))
+    return total + float(order.get("delivery_price", 0) or 0)
+
+
+async def erp_daily_sales(day, config: dict, eur_rate: float) -> dict:
+    """Orders created on `day` (Warsaw) per source_shop, in the fact_daily_revenue row shape.
+    Returns {"rows": [...], "shops": [ERP shop names], "ref_key": key used for order numbers or None}."""
+    erp_config = config.get("connectors", {}).get("ideaerp", {})
+    base_url = erp_config.get("base_url", "https://api.delta.ideaerp.pl")
+    token = get_env_optional(f"{erp_config.get('env_prefix', 'IDEAERP')}_API_TOKEN")
+    if not token:
+        raise RuntimeError("Brak IDEAERP_API_TOKEN")
+    warsaw = ZoneInfo("Europe/Warsaw")
+    start = datetime(day.year, day.month, day.day, tzinfo=warsaw)
+    params = {
+        "create_date_from": start.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+        "create_date_to": (start + timedelta(days=1)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    headers = {"Authorization": f"Bearer {token}"}
+    conn = IdeaERPConnector(config)
+    agg: dict[str, dict] = defaultdict(lambda: {"orders": 0, "paid": 0, "cancelled": 0, "gross": 0.0,
+                                                "gross_paid": 0.0, "original": 0.0, "currency": "PLN"})
+    ref_key = None
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        shops = await conn._fetch_shops(client, base_url, headers)
+        for shop in shops:
+            orders = await conn._fetch_orders_paginated(client, base_url, headers,
+                                                        {"shop_id": shop["id"], **params})
+            for o in orders:
+                ref_key = ref_key or next((k for k in REF_KEYS if isinstance(o.get(k), str) and o[k].strip()), None)
+                currency = (o.get("currency") or "PLN").upper()
+                value = order_total(o)
+                pln = value * eur_rate if currency == "EUR" else value
+                a = agg[classify_order(o, shop.get("name") or "")]
+                a["orders"] += 1
+                a["gross"] += pln
+                a["original"] += value
+                a["currency"] = currency
+                if o.get("is_paid"):
+                    a["paid"] += 1
+                    a["gross_paid"] += pln
+                if str(o.get("status") or "").lower() in ("anulowane", "cancel", "cancelled"):
+                    a["cancelled"] += 1
+    rows = [{
+        "date": day.isoformat(), "source_shop": shop, "orders_count": a["orders"], "orders_paid": a["paid"],
+        "orders_cancelled": a["cancelled"], "revenue_gross_pln": round(a["gross"], 2),
+        "revenue_paid_pln": round(a["gross_paid"], 2), "revenue_gross_original": round(a["original"], 2),
+        "original_currency": a["currency"],
+        "avg_order_value_pln": round(a["gross"] / a["orders"], 2) if a["orders"] else 0,
+    } for shop, a in agg.items()]
+    return {"rows": rows, "shops": [s.get("name") for s in shops], "ref_key": ref_key}
