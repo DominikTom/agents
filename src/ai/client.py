@@ -85,8 +85,9 @@ class AIClient:
             else:
                 async with self.client.messages.stream(**params) as stream:
                     message = await stream.get_final_message()
-        except anthropic.APIError:
+        except anthropic.APIError as e:
             await self._log(purpose, model, None, started, ok=False)
+            await _explain_billing(e)
             raise
 
         await self._log(purpose, model, message, started, ok=message.stop_reason != "refusal")
@@ -119,8 +120,9 @@ class AIClient:
                 messages=[{"role": "user", "content": content}],
                 output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
             )
-        except anthropic.APIError:
+        except anthropic.APIError as e:
             await self._log(purpose, model, None, started, ok=False)
+            await _explain_billing(e)
             raise
         await self._log(purpose, model, message, started, ok=message.stop_reason == "end_turn")
         if message.stop_reason == "refusal":
@@ -148,3 +150,26 @@ class AIClient:
             )
         except Exception as e:  # usage logging must never break a report
             logger.debug(f"ai_calls log failed: {e}")
+
+
+NO_CREDIT = ("Na koncie Anthropic API skończyły się środki — agenci nie mogą używać AI (raporty, streszczenia "
+             "czatów, zobowiązania). Doładuj: console.anthropic.com → Settings → Billing (warto włączyć "
+             "auto-doładowanie).")
+_last_credit_alert = 0.0
+
+
+async def _explain_billing(err: Exception) -> None:
+    """Out of API credit: say it in Polish and alert once per 6 h (Slack + e-mail) — background jobs fail
+    silently otherwise. Raises the readable error instead of the raw one."""
+    global _last_credit_alert
+    if "credit balance is too low" not in str(err):
+        return
+    if time.monotonic() - _last_credit_alert > 6 * 3600 or not _last_credit_alert:
+        _last_credit_alert = time.monotonic()
+        try:
+            from src.jobs import _notify
+
+            await _notify("Brak środków na Anthropic API", NO_CREDIT)
+        except Exception as e:  # the alert must never hide the real error
+            logger.warning(f"Credit alert failed: {e}")
+    raise RuntimeError(NO_CREDIT) from err
