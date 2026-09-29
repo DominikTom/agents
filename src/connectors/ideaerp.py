@@ -213,7 +213,7 @@ class IdeaERPConnector(BaseConnector):
 # currency, Amazon… = amazon.de); the same rule is applied here so both sources agree.
 REF_KEYS = ("name", "number", "order_number", "numer", "reference", "client_order_ref", "shop_order_number",
             "external_number", "external_id", "origin")
-PREFIX_SHOP = (("shopify", "mittohome.pl"), ("amazon", "amazon.de"), ("nomo", "unknown"))
+PREFIX_SHOP = (("shopify", "mittohome.pl"), ("amazon", "amazon.de"), ("nomo", "unknown"), ("zam/", "manual"))
 
 
 def order_ref(order: dict) -> str:

@@ -512,6 +512,7 @@ def test_erp_orders_map_to_dash_shops():
     assert classify_order({}, "Delta Industries sp. z o.o.") == "mybed.pl"
     assert classify_order({"currency": "EUR"}, "Delta Industries") == "mybed.de"
     assert classify_order({}, "All Good Things Sp z o o") == "inne"
+    assert classify_order({"name": "ZAM/0291/2026"}, "Delta Industries") == "manual"  # hand-entered, as in the dash
     assert order_total({"order_lines": [{"order_line_gross": "100.5"}, {"order_line_gross": 20}], "delivery_price": 9}) == 129.5
 
 
