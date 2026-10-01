@@ -54,6 +54,8 @@ class DashClient:
         return await self.rest.select("fact_daily_adspend", {
             "select": "date,platform,account_id,spend,spend_original,original_currency",
             "and": f"(date.gte.{since.isoformat()},date.lte.{until.isoformat()})",
+            # stable order: more than one page (~1 500 rows), and paging without ORDER BY may skip/duplicate rows
+            "order": "date,account_id,campaign_id,adset_name",
         })
 
     async def google_cost(self, since: date, until: date) -> list[dict]:
@@ -61,6 +63,7 @@ class DashClient:
             "select": "date,hostname,ad_cost",
             "source": "eq.__total__",
             "and": f"(date.gte.{since.isoformat()},date.lte.{until.isoformat()})",
+            "order": "date,hostname",
         })
 
     async def showrooms(self, since: date, until: date) -> list[dict]:

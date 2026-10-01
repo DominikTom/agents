@@ -89,6 +89,36 @@ async def test_connector(name: str, config: dict) -> None:
         print("  ", item)
 
 
+async def dash_check(day: str | None) -> None:
+    """Raw view of what the dash connector returns for one day — to debug "no data" in reports."""
+    from collections import Counter
+    from datetime import date as _date, timedelta as _td
+
+    from src.common.timeutil import today
+    from src.connectors.dash import DashClient
+
+    d = _date.fromisoformat(day) if day else today() - _td(days=1)
+    c = DashClient()
+    print(f"URL: {c.rest.url} · klucz: {'jest' if c.rest.key else 'BRAK'} ({len(c.rest.key)} znaków)")
+    for name, fn in (("Meta (fact_daily_adspend)", c.adspend), ("GA4 (fact_daily_traffic)", c.google_cost),
+                     ("sprzedaż (fact_daily_revenue)", c.revenue)):
+        try:
+            rows = await fn(d - _td(days=65), d)
+        except Exception as e:
+            print(f"{name}: BŁĄD {type(e).__name__}: {e}")
+            continue
+        dates = sorted({str(r.get("date")) for r in rows})
+        day_rows = [r for r in rows if str(r.get("date")) == d.isoformat()]
+        print(f"{name}: {len(rows)} wierszy, daty {dates[:1]}…{dates[-1:]}, za {d}: {len(day_rows)}")
+        if day_rows:
+            print("   klucze:", sorted(day_rows[0].keys()), "· typy:", {k: type(v).__name__ for k, v in day_rows[0].items()})
+            print("   platformy/sklepy:", Counter(str(r.get("platform") or r.get("source_shop") or r.get("hostname")) for r in day_rows))
+    o = await c.overview(d)
+    print("missing:", o.get("missing"), "· źródło sprzedaży:", o.get("sales_source"))
+    print("per_platforma:", o["marketing"]["per_platforma"])
+    print("brak_danych:", o["marketing"]["brak_danych"])
+
+
 async def erp_check(day: str | None, config: dict) -> None:
     """Sales of one day per shop from IdeaERP and from the dash warehouse, side by side (no order data printed)."""
     from datetime import date as _date, timedelta as _td
@@ -126,6 +156,8 @@ def main() -> None:
     run.add_argument("agent")
     test = sub.add_parser("test-connector", help="Test a live connector")
     test.add_argument("connector")
+    dc = sub.add_parser("dash-check", help="What the agents read from the dash for a day (ads, sales)")
+    dc.add_argument("day", nargs="?", help="YYYY-MM-DD, default yesterday")
     erp = sub.add_parser("erp-check", help="Compare a day's sales: IdeaERP vs dash (per shop)")
     erp.add_argument("day", nargs="?", help="YYYY-MM-DD, default yesterday")
 
@@ -141,6 +173,8 @@ def main() -> None:
         asyncio.run(run_job(args.name))
     elif args.command == "test-connector":
         asyncio.run(test_connector(args.connector, config))
+    elif args.command == "dash-check":
+        asyncio.run(dash_check(args.day))
     elif args.command == "erp-check":
         asyncio.run(erp_check(args.day, config))
 
