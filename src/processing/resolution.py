@@ -69,7 +69,8 @@ SYSTEM = """Pilnujesz listy otwartych spraw Dominika Tomaszczyka (CEO MyBed Grou
 Zdecyduj dla każdej pozycji:
 - done — z dowodów wynika, że sprawa jest załatwiona: Dominik odpowiedział / wysłał / zdecydował / podpisał / przelał (w dowolnym kanale), albo — przy „czekasz na” — druga strona dostarczyła. Odpowiedź Dominika na prośbę o decyzję lub odpowiedź (nawet odmowa albo „zdecyduję w piątek”) zamyka prośbę.
 - obsolete — sprawa przestała być aktualna (odwołana, rozwiązana inaczej, ktoś napisał, że już nie trzeba).
-- open — w pozostałych przypadkach, także gdy nie masz pewności. Sama wzmianka o temacie albo rozmowa z tą osobą o czymś innym to jeszcze nie załatwienie.
+- obsolete także wtedy, gdy sprawa dotyczyła konkretnej chwili, która już minęła (telefon albo spotkanie o danej godzinie, „uprzedź go przed rozmową”, „przygotuj na spotkanie”, „dziś do 10:00”) — po tym czasie nie ma już czego robić. Pomaga kalendarz: spotkanie w tej sprawie, które już się odbyło.
+- open — w pozostałych przypadkach, także gdy nie masz pewności. Sama wzmianka o temacie albo rozmowa z tą osobą o czymś innym to jeszcze nie załatwienie. Zwykłe zadanie po terminie (np. „wyślij umowę do 15.11”) zostaje open, dopóki nie ma dowodu załatwienia.
 
 NOTATKA DOMINIKA jest rozstrzygająca: jeśli mówi, że sprawa jest ogarnięta/załatwiona/podpisana/nieaktualna — zamknij ją (done albo obsolete), nawet bez innych dowodów.
 reason: jedno krótkie zdanie po polsku z konkretem i kanałem (np. „Dominik 17.11 odpisał Maciejowi na WhatsAppie, że akceptuje 75 tys. zł”, „Notatka Dominika 18.11: umowa Eli podpisana”). evidence: id dowodu (np. „e123” albo „n4”) albo pusty tekst.
@@ -107,7 +108,12 @@ class ItemResolver:
         self.model = model
 
     async def run(self, only_ids: list[int] | None = None, force: bool = False) -> dict:
-        stats = {"checked": 0, "done": 0, "obsolete": 0, "skipped": 0, "errors": 0, "closed": []}
+        stats = {"checked": 0, "done": 0, "obsolete": 0, "skipped": 0, "errors": 0, "closed": [], "expired": 0}
+        if only_ids is None:
+            try:
+                stats["expired"] = len(await self.db.expire_time_bound())
+            except Exception as e:
+                logger.warning(f"Expiring time-bound items failed: {e}")
         items = await self.db.get_crosscheck_candidates(limit=MAX_ITEMS)
         if only_ids is not None:
             items = [i for i in items if i["id"] in set(only_ids)]
@@ -117,7 +123,9 @@ class ItemResolver:
         todo = []
         for item in items:
             pack = await self._evidence(item, notes)
-            if not (pack["events"] or pack["notes"]) or not (force or self._has_new_evidence(item, pack)):
+            # a deadline that just passed is worth one look even without new messages (moment gone → obsolete)
+            due_passed = self._due_passed_since_check(item)
+            if not due_passed and (not (pack["events"] or pack["notes"]) or not (force or self._has_new_evidence(item, pack))):
                 stats["skipped"] += 1
                 continue
             todo.append((item, pack))
@@ -143,6 +151,14 @@ class ItemResolver:
         if stats["done"] or stats["obsolete"]:
             logger.info(f"Items closed across sources: done {stats['done']}, obsolete {stats['obsolete']}")
         return stats
+
+    @staticmethod
+    def _due_passed_since_check(item: dict) -> bool:
+        due = item.get("due_date")
+        if not due or due >= today():
+            return False
+        last = item.get("xchecked_at")
+        return last is None or to_local(last).date() <= due
 
     @staticmethod
     def _has_new_evidence(item: dict, pack: dict) -> bool:
@@ -174,8 +190,10 @@ class ItemResolver:
     async def _judge(self, batch: list[tuple[dict, dict]]) -> dict[int, dict]:
         blocks = []
         for item, pack in batch:
+            due = f" · termin {item['due_date']:%d.%m}" + (" (PO TERMINIE)" if item["due_date"] < today() else "") \
+                if item.get("due_date") else ""
             head = (f"### Pozycja id {item['id']} · {DIRECTION.get(item['direction'], item['direction'])} · "
-                    f"z: {item.get('counterpart') or '?'} · powstała {_fmt(item.get('source_at'))} "
+                    f"z: {item.get('counterpart') or '?'}{due} · powstała {_fmt(item.get('source_at'))} "
                     f"({'mail' if item.get('source') == 'gmail' else item.get('source')}: {item.get('chat_name') or ''})\n"
                     f"{item['title']}")
             if item.get("context"):
@@ -199,6 +217,9 @@ def _evidence_line(e: dict) -> str:
     meta = _j(e.get("metadata"), {})
     mine = e.get("from_me") or meta.get("from_me")
     who = "Dominik" if mine else (e.get("sender_display") or meta.get("sender_name") or meta.get("from") or "?")
+    if e["source"] == "calendar":
+        when = "odbyło się" if e["timestamp"] < now() else "zaplanowane"
+        return f"[e{e['id']}] KALENDARZ {_fmt(e['timestamp'])} ({when}): spotkanie „{(e.get('title') or '')[:100]}”"
     if e["source"] == "gmail":
         where = f"mail „{(e.get('title') or '')[:80]}”" + (f" do {meta.get('to', '')[:80]}" if mine else "")
         from src.processing.email_digest import strip_quoted

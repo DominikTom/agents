@@ -674,14 +674,20 @@ def test_data_health_warns_when_whatsapp_is_silent():
                     {"source": "gmail", "last_event": current - timedelta(minutes=20)}]
 
         async def last_ingest_at(self, source):
-            return current - timedelta(minutes=10)
+            return current - timedelta(days=2)  # calendar events are updated in place — not a sync signal
+
+        async def last_success_at(self, job):
+            return current - timedelta(minutes=25)
 
         async def get_setting(self, key, default=None):
             return {}
 
     h = asyncio.run(data_health(FakeDB(), current))
     assert len(h["warnings"]) == 1 and h["warnings"][0].startswith("WhatsApp nie dostarcza wiadomości od 08.11")
-    assert not h["sources"]["whatsapp"]["ok"] and h["sources"]["gmail"]["ok"]
+    assert not h["sources"]["whatsapp"]["ok"] and h["sources"]["gmail"]["ok"] and h["sources"]["calendar"]["ok"]
+    from src.reports.health import hides_replies
+
+    assert hides_replies(h) and not hides_replies({"warnings": ["Kalendarz Google nie synchronizuje się"]})
     assert "nie pisz „brak nowych rozmów”" in health_instruction(h) and health_instruction({"warnings": []}) == ""
 
 
@@ -791,3 +797,62 @@ def test_nbp_rates_parse():
     rates = parse_nbp([{"rates": [{"code": "EUR", "mid": 4.2311}, {"code": "CZK", "mid": 0.1689}]}])
     assert rates == {"PLN": 1.0, "EUR": 4.2311, "CZK": 0.1689}
     assert round(to_pln(100, "eur", rates), 2) == 423.11 and to_pln(10, None, rates) == 10
+
+
+def test_resolver_looks_once_at_an_item_whose_deadline_passed():
+    import asyncio
+    from datetime import date, datetime, timedelta, timezone
+
+    from src.common.timeutil import today
+    from src.processing.resolution import ItemResolver
+
+    t = datetime(2026, 11, 16, 7, tzinfo=timezone.utc)
+    past = today() - timedelta(days=2)
+    item = {"id": 5, "direction": "ask", "title": "Uprzedź Wojtka Zyzaka o telefonie od Kamila (Thulium) dziś ok. 10:00",
+            "counterpart": "Kamil Kokoszka", "source": "gmail", "chat_name": "Thulium", "source_at": t,
+            "due_date": past, "xchecked_at": None}
+
+    class FakeDB:
+        closed, checked, expired_called = [], [], []
+
+        async def expire_time_bound(self):
+            self.expired_called.append(1)
+            return []
+
+        async def get_crosscheck_candidates(self, limit=120):
+            return [item]
+
+        async def list_notes(self, since=None, limit=50, active_only=True):
+            return []
+
+        async def resolve_entity(self, source, name):
+            return None
+
+        async def entity_emails(self, eid):
+            return []
+
+        async def find_evidence(self, since, terms, entity_id=None, emails=None, limit=10):
+            return []  # nothing new was written — the deadline alone triggers the check
+
+        async def auto_close_commitment(self, cid, status, reason):
+            self.closed.append((cid, status))
+
+        async def mark_crosschecked(self, ids):
+            self.checked.extend(ids)
+
+    class FakeAI:
+        prompts = []
+
+        async def extract(self, **kw):
+            self.prompts.append(kw["content"])
+            return {"items": [{"id": 5, "status": "obsolete", "reason": "telefon był 16.11", "evidence": ""}]}
+
+    db, ai = FakeDB(), FakeAI()
+    asyncio.run(ItemResolver(db, ai).run())
+    assert db.closed == [(5, "dismissed")] and db.expired_called and "PO TERMINIE" in ai.prompts[0]
+    # checked after the deadline already → no second look without new evidence
+    item["xchecked_at"] = datetime.now(timezone.utc)
+    ai.prompts.clear()
+    asyncio.run(ItemResolver(db, ai).run())
+    assert ai.prompts == []
+    assert not ItemResolver._due_passed_since_check({"due_date": date(2099, 1, 1), "xchecked_at": None})

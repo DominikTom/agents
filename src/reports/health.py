@@ -41,14 +41,16 @@ async def data_health(db, current: datetime | None = None) -> dict:
                                "ok": warn is None}
         if warn:
             out["warnings"].append(warn)
+    # calendar events are updated in place (their ingested_at stays), so "is it syncing" = last successful sync run
     try:
-        cal = await db.last_ingest_at("calendar")
+        cal = await db.last_success_at("calendar_sync")
     except Exception:
         cal = None
-    if cal is None or (current - cal).total_seconds() > 12 * 3600:
-        out["warnings"].append("Kalendarz Google nie synchronizuje się" + (f" od {fmt_short(cal)}" if cal else ""))
+    cal_ok = cal is not None and (current - cal).total_seconds() <= 3 * 3600
+    if not cal_ok:
+        out["warnings"].append("Kalendarz Google nie synchronizuje się" + (f" (ostatnio {fmt_short(cal)})" if cal else ""))
     out["sources"]["calendar"] = {"label": "Kalendarz", "last": to_local(cal).isoformat(timespec="minutes") if cal else None,
-                                  "ok": cal is not None and (current - cal).total_seconds() <= 12 * 3600}
+                                  "ok": cal_ok}
     try:
         from src.connectors.panel_erp import PanelERPClient
 
@@ -76,6 +78,14 @@ async def data_health(db, current: datetime | None = None) -> dict:
         if out["sources"]["whatsapp"]["ok"]:
             out["warnings"].append(f"WhatsApp rozłączony od {fmt_short(since)} (bridge)")
     return out
+
+
+MESSAGING = ("WhatsApp", "Gmail")
+
+
+def hides_replies(health: dict) -> bool:
+    """A messaging source is stale — Dominik's replies there are invisible to the agents."""
+    return any(w.startswith(MESSAGING) for w in health.get("warnings", []))
 
 
 def health_instruction(health: dict) -> str:

@@ -199,6 +199,7 @@ async def build_day(db, ref: date | None = None, os_snapshot=None) -> dict:
         "os": os_rows,
         "closed": closed,
         "warnings": health.get("warnings", []),
+        "replies_hidden": any(w.startswith(("WhatsApp", "Gmail")) for w in health.get("warnings", [])),
         "counts": counts,
         "sales": sales,
     }

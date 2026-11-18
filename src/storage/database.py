@@ -275,6 +275,8 @@ ALTER TABLE commitments ADD COLUMN IF NOT EXISTS snoozed_until DATE;
 -- last cross-source check (other chats, e-mail, notes) — re-checked only when new evidence arrives
 ALTER TABLE commitments ADD COLUMN IF NOT EXISTS xchecked_at TIMESTAMPTZ;
 ALTER TABLE commitments ADD COLUMN IF NOT EXISTS note TEXT;
+-- the item only makes sense until a moment (a call at 10:00, "before the meeting") — dropped once its day is over
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS time_bound BOOLEAN DEFAULT FALSE;
 
 -- What Dominik told the agents himself (MCP chat / panel): facts and decisions that settle open items
 -- and that reports treat as authoritative ("umowa Eli podpisana", "Comfy: płacimy w 3 ratach")
@@ -1292,15 +1294,17 @@ class Database:
     async def upsert_commitment(self, c: dict) -> int | None:
         row = await self._fetchone(
             "INSERT INTO commitments (fingerprint, direction, title, context, counterpart, source, chat_jid, "
-            "chat_name, source_at, due_date, due_hint, kind, note) "
-            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) "
+            "chat_name, source_at, due_date, due_hint, kind, note, time_bound) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) "
             "ON CONFLICT (fingerprint) DO UPDATE SET context = EXCLUDED.context, "
             "due_date = COALESCE(EXCLUDED.due_date, commitments.due_date), "
-            "kind = COALESCE(commitments.kind, EXCLUDED.kind), updated_at = NOW() "
+            "kind = COALESCE(commitments.kind, EXCLUDED.kind), "
+            "time_bound = commitments.time_bound OR EXCLUDED.time_bound, updated_at = NOW() "
             "RETURNING id",
             c["fingerprint"], c["direction"], c["title"], c.get("context"), c.get("counterpart"),
             c["source"], c.get("chat_jid"), c.get("chat_name"), c.get("source_at"),
             c.get("due_date"), c.get("due_hint"), c.get("kind") or default_kind(c["direction"]), c.get("note"),
+            bool(c.get("time_bound")),
         )
         return row["id"] if row else None
 
@@ -1369,7 +1373,7 @@ class Database:
             "COALESCE((e.metadata->>'from_me')::boolean, false) AS from_me, "
             "CASE WHEN $2::text IS NULL THEN 0 ELSE ts_rank(e.search_vector, to_tsquery('simple', $2)) END AS rank "
             "FROM events e LEFT JOIN entities ent ON ent.id = e.sender_entity_id "
-            "WHERE e.source IN ('whatsapp', 'gmail') AND e.timestamp > $1 "
+            "WHERE e.source IN ('whatsapp', 'gmail', 'calendar') AND e.timestamp > $1 "
             "AND NOT COALESCE((e.metadata->>'bulk')::boolean, false) AND ("
             "  ($2::text IS NOT NULL AND e.search_vector @@ to_tsquery('simple', $2)) "
             "  OR ($3::int IS NOT NULL AND e.sender_entity_id = $3) "
@@ -1573,6 +1577,15 @@ class Database:
             "AND (due_date IS NULL OR due_date < CURRENT_DATE - $1::int) RETURNING id", days,
         )
         return len(rows)
+
+    async def expire_time_bound(self) -> list[dict]:
+        """Items tied to a moment (a call at 10:00, "before the meeting") whose day is over → no longer current."""
+        return await self._fetchall(
+            "UPDATE commitments SET status = 'dismissed', resolved_by = 'auto', resolved_at = NOW(), "
+            "resolution = 'minął dzień, którego dotyczyła sprawa (' || to_char(due_date, 'DD.MM') || ')' "
+            "WHERE status = 'open' AND NOT COALESCE(keep_open, FALSE) AND COALESCE(time_bound, FALSE) "
+            "AND due_date < CURRENT_DATE RETURNING id, title"
+        )
 
     async def mark_commitment_pushed(self, cid: int, os_ref: str) -> None:
         await self._execute(

@@ -10,7 +10,7 @@
 {% if d.warnings %}
 <div class="mb-4 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
   <span class="mt-0.5 shrink-0">{{ icon("triangle-alert") }}</span>
-  <div><span class="font-semibold">Dane niepełne:</span> {{ d.warnings|join(" · ") }}. Twoje odpowiedzi z tego kanału nie są widoczne — sprawy mogą wyglądać na otwarte, choć są załatwione.
+  <div><span class="font-semibold">Dane niepełne:</span> {{ d.warnings|join(" · ") }}.{% if d.replies_hidden %} Twoje odpowiedzi z tego kanału nie są widoczne — sprawy mogą wyglądać na otwarte, choć są załatwione.{% endif %}
     {% if "WhatsApp" in d.warnings|join(" ") %}<a class="ml-1 font-semibold underline" href="/sources/whatsapp">Połącz WhatsApp</a>{% endif %}</div>
 </div>
 {% endif %}

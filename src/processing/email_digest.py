@@ -47,8 +47,9 @@ SCHEMA = {
                     "due_date": {"type": "string"},
                     "due_hint": {"type": "string"},
                     "evidence": {"type": "string"},
+                    "time_bound": {"type": "boolean"},
                 },
-                "required": ["direction", "kind", "counterpart", "what", "due_date", "due_hint", "evidence"],
+                "required": ["direction", "kind", "counterpart", "what", "due_date", "due_hint", "evidence", "time_bound"],
                 "additionalProperties": False,
             },
         },
@@ -69,6 +70,7 @@ Zwracasz:
 - items: tylko konkretne, aktualne po ostatnim mailu sprawy:
   • direction mine — Dominik obiecał coś zrobić; ask — ktoś prosi Dominika o działanie/decyzję/odpowiedź; theirs — ktoś obiecał coś Dominikowi.
   • kind: decyzja — Dominik ma coś zatwierdzić, wybrać, zaakceptować (wycena, umowa, oferta, termin); odpowiedz — ktoś czeka na jego odpowiedź lub informację; zadanie — konkretne działanie (podpisać, wysłać, przelać, zadzwonić). Dla theirs wybierz to, co najlepiej opisuje oczekiwaną rzecz.
+  • time_bound = true, gdy sprawa ma sens tylko do konkretnej chwili i po niej sama się dezaktualizuje (telefon albo spotkanie o danej godzinie, „uprzedź go przed rozmową”, „przygotuj na jutro na 10:00”, „daj znać do końca dnia”); wtedy due_date = dzień tej chwili. Inaczej false.
   • what = zwięzłe zadanie w trybie rozkazującym, zrozumiałe bez czytania maila (np. „Zatwierdź korektę wyceny MittoHome (75 tys. zł zamiast 156 tys. zł)”).
   • due_date = RRRR-MM-DD, jeśli termin wynika z maila (licz względem daty maila), inaczej pusty tekst; due_hint = oryginalne sformułowanie albo pusty tekst; evidence = krótki cytat.
   Pomiń sprawy już załatwione w tym wątku (Dominik odpisał, zdecydował, ktoś potwierdził wykonanie) i grzecznościowe „odezwę się”.
@@ -167,6 +169,7 @@ class EmailDigester:
                 "fingerprint": fingerprint("gmail", tid, direction, what),
                 "direction": direction,
                 "kind": kind,
+                "time_bound": bool(c.get("time_bound")),
                 "title": what[:300],
                 "context": (c.get("evidence") or "")[:500],
                 "counterpart": (c.get("counterpart") or "")[:120],

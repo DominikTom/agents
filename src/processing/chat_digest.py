@@ -47,8 +47,9 @@ DIGEST_SCHEMA = {
                     "due_date": {"type": "string"},
                     "due_hint": {"type": "string"},
                     "evidence": {"type": "string"},
+                    "time_bound": {"type": "boolean"},
                 },
-                "required": ["direction", "kind", "counterpart", "what", "due_date", "due_hint", "evidence"],
+                "required": ["direction", "kind", "counterpart", "what", "due_date", "due_hint", "evidence", "time_bound"],
                 "additionalProperties": False,
             },
         },
@@ -79,6 +80,7 @@ Co zwracasz:
   • mine — Dominik obiecał coś zrobić („wyślę”, „zadzwonię”, „dam znać do piątku”),
   • ask — ktoś wprost prosi Dominika o działanie/decyzję,
   • theirs — ktoś obiecał coś Dominikowi.
+  time_bound = true, gdy sprawa ma sens tylko do konkretnej chwili i po niej sama się dezaktualizuje (telefon albo spotkanie o danej godzinie, „uprzedź go przed rozmową”, „przygotuj na jutro na 10:00”, „daj znać do końca dnia”); wtedy due_date = dzień tej chwili. Inaczej false.
   kind = decyzja (Dominik ma coś zatwierdzić / wybrać / zaakceptować), odpowiedz (ktoś czeka na jego odpowiedź lub informację), zadanie (konkretne działanie: wysłać, podpisać, przelać, zadzwonić).
   what = zwięzłe zadanie w trybie rozkazującym, zrozumiałe bez czytania czatu (np. „Wyślij Sandrze cennik B2B dla hotelu Arłamów”). counterpart = druga osoba. due_date = RRRR-MM-DD, jeśli termin wynika z rozmowy (licz względem daty rozmowy), inaczej pusty tekst; due_hint = oryginalne sformułowanie terminu albo pusty tekst. evidence = krótki cytat. Pomiń rzeczy już zrobione w tej samej rozmowie oraz grzecznościowe „odezwę się”.
 
@@ -209,6 +211,7 @@ class ChatDigester:
                 "fingerprint": fp,
                 "direction": direction,
                 "kind": kind,
+                "time_bound": bool(c.get("time_bound")),
                 "title": what[:300],
                 "context": (c.get("evidence") or "")[:500],
                 "counterpart": (c.get("counterpart") or "")[:120],
