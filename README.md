@@ -50,6 +50,7 @@ Potem w panelu: **Źródła → WhatsApp** → zeskanuj kod QR (albo „Połącz
 | `BRIDGE_TOKEN` | `openssl rand -hex 32` — wspólny sekret agentów i bridge'a |
 | `OS_SUPABASE_SERVICE_KEY` | Supabase → projekt **mybed-group-os** → Settings → API keys → secret (service_role) |
 | `DASH_SUPABASE_SERVICE_KEY` | Supabase → projekt z hurtownią (dash) → Settings → API keys → secret |
+| `PANEL_SUPABASE_SERVICE_KEY` | Supabase (organizacja Mybed2) → projekt **panel-zamowien** → Settings → API keys → secret. Dzisiejsza sprzedaż na żywo z API sklepów (co 10 min). Agenci tylko czytają `sklep_zamowienia` (pola zamówienia, bez klientów) i `sklepy`. Sprawdzenie po wdrożeniu: `python -m src.main panel-check` |
 | `RESEND_API_KEY`, `EMAIL_FROM` | to samo konto Resend co w MyBed OS (albo `SMTP_*`) |
 | `PUBLIC_BASE_URL` | `https://agents.mybed.pl` — linki w mailach |
 | `DASHBOARD_PASSWORD` | wymagane, nie ma już domyślnego `admin/admin` |
@@ -67,6 +68,7 @@ Usunięte: `ASANA_*`, `SHOPER_*`, `SHOPIFY_*`.
 ```bash
 python -m src.main report morning_briefing          # wygeneruj i wyślij teraz
 python -m src.main report weekly_review --no-deliver
+python -m src.main panel-check                      # dzisiejsza sprzedaż z API sklepów (nowy ERP) obok dash
 python -m src.main job chat_digests                 # whatsapp_sync | gmail_sync | calendar_sync | slack_sync | team_updates | os_people_sync | topic_extraction | ideaerp_sync | whatsapp_watchdog | live_refresh
 npm run css                                          # przebuduj CSS po zmianie szablonów (Docker robi to sam)
 pytest                                               # testy jednostkowe

@@ -222,7 +222,7 @@ def test_lineage_sources_line():
     assert set(SECTION_SOURCES) == set(SECTION_CATALOG)
     assert all(src == "ai" or src in SOURCES for srcs in SECTION_SOURCES.values() for src in srcs)
     line = sources_line(["top", "sales", "chats", "team_updates"], "2026-09-22")
-    assert line.startswith("Hurtownia dash, IdeaERP, WhatsApp, MyBed Group OS, Slack") and line.endswith("liczby do 22.09")
+    assert line.startswith("Hurtownia dash, Panel zamówień (nowy ERP), IdeaERP, WhatsApp, MyBed Group OS, Slack") and line.endswith("liczby do 22.09")
 
 
 def test_numeric_marking_is_idempotent_and_counts_cells_with_attributes():
@@ -682,7 +682,7 @@ def test_data_health_warns_when_whatsapp_is_silent():
     h = asyncio.run(data_health(FakeDB(), current))
     assert len(h["warnings"]) == 1 and h["warnings"][0].startswith("WhatsApp nie dostarcza wiadomości od 08.11")
     assert not h["sources"]["whatsapp"]["ok"] and h["sources"]["gmail"]["ok"]
-    assert "Nie pisz „brak nowych rozmów”" in health_instruction(h) and health_instruction({"warnings": []}) == ""
+    assert "nie pisz „brak nowych rozmów”" in health_instruction(h) and health_instruction({"warnings": []}) == ""
 
 
 def test_compact_migration_shortens_saved_reports_once_and_keeps_user_settings():
@@ -747,3 +747,47 @@ def test_manual_due_dates():
     assert parse_due("25.11.2026") == date(2026, 11, 25)
     with pytest.raises(ValueError):
         parse_due("kiedyś")
+
+
+def test_panel_orders_aggregate_per_shop_with_shop_currency():
+    from src.connectors.panel_erp import aggregate
+
+    rates = {"PLN": 1.0, "EUR": 4.25, "CZK": 0.17}
+    orders = [
+        {"sklep": "mybed_pl", "data_zam": "2026-11-18T08:30:00+00:00", "status_typ": 2, "oplacone": True, "suma": 3000, "waluta": "PLN"},
+        {"sklep": "mybed_pl", "data_zam": "2026-11-18T09:00:00+00:00", "status_typ": 1, "oplacone": False, "suma": 1000, "waluta": "PLN"},
+        {"sklep": "mybed_pl", "data_zam": "2026-11-17T23:30:00+00:00", "status_typ": 4, "oplacone": True, "suma": 500, "waluta": "PLN"},
+        {"sklep": "mybed_de", "data_zam": "2026-11-18T10:00:00+00:00", "status_typ": 2, "oplacone": True, "suma": 1000, "waluta": "EUR"},
+        {"sklep": "mybed_cz", "data_zam": "2026-11-18T10:00:00+00:00", "status_typ": 2, "oplacone": False, "suma": 32989, "waluta": "CZK"},
+        {"sklep": "nieznany", "data_zam": "2026-11-18T10:00:00+00:00", "status_typ": 2, "oplacone": True, "suma": 1, "waluta": "PLN"},
+    ]
+    rows = {(r["date"], r["source_shop"]): r for r in aggregate(orders, rates)}
+    pl = rows[("2026-11-18", "mybed.pl")]  # 23:30 UTC on 17.11 = 00:30 Warsaw on 18.11
+    assert (pl["orders_count"], pl["orders_paid"], pl["orders_cancelled"]) == (3, 1, 1)
+    assert pl["revenue_gross_pln"] == 4500 and pl["revenue_paid_pln"] == 3000
+    assert rows[("2026-11-18", "mybed.de")]["revenue_gross_pln"] == 4250
+    cz = rows[("2026-11-18", "mojepostel.cz")]
+    assert cz["revenue_gross_pln"] == round(32989 * 0.17, 2) and cz["original_currency"] == "CZK"
+    assert len(rows) == 3
+
+
+def test_mojepostel_amounts_recorded_as_pln_are_converted_from_czk():
+    from src.connectors.dash import alias_shops
+
+    rows = alias_shops([{"date": "2026-11-14", "source_shop": "shoper_unknown", "orders_count": 1, "orders_paid": 0,
+                         "revenue_gross_pln": 32989, "revenue_paid_pln": 0, "original_currency": "PLN"}],
+                       {"CZK": 0.17})
+    assert rows[0]["source_shop"] == "mojepostel.cz" and rows[0]["revenue_gross_pln"] == round(32989 * 0.17, 2)
+    assert rows[0]["original_currency"] == "CZK" and rows[0]["revenue_gross_original"] == 32989
+    # already in CZK (if the dash fixes it): left alone
+    fixed = alias_shops([{"date": "2026-11-14", "source_shop": "shoper_unknown", "revenue_gross_pln": 5600,
+                          "original_currency": "CZK"}], {"CZK": 0.17})
+    assert fixed[0]["revenue_gross_pln"] == 5600
+
+
+def test_nbp_rates_parse():
+    from src.common.fx import parse_nbp, to_pln
+
+    rates = parse_nbp([{"rates": [{"code": "EUR", "mid": 4.2311}, {"code": "CZK", "mid": 0.1689}]}])
+    assert rates == {"PLN": 1.0, "EUR": 4.2311, "CZK": 0.1689}
+    assert round(to_pln(100, "eur", rates), 2) == 423.11 and to_pln(10, None, rates) == 10

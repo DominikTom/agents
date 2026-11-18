@@ -50,6 +50,23 @@ async def data_health(db, current: datetime | None = None) -> dict:
     out["sources"]["calendar"] = {"label": "Kalendarz", "last": to_local(cal).isoformat(timespec="minutes") if cal else None,
                                   "ok": cal is not None and (current - cal).total_seconds() <= 12 * 3600}
     try:
+        from src.connectors.panel_erp import PanelERPClient
+
+        panel = PanelERPClient()
+        if panel.configured:
+            sync = await panel.sync_status()
+            last = datetime.fromisoformat(sync["last"].replace("Z", "+00:00")) if sync.get("last") else None
+            ok = last is not None and (current - last).total_seconds() <= 3600
+            out["sources"]["sklepy"] = {"label": "Sklepy (panel zamówień)", "last": to_local(last).isoformat(timespec="minutes") if last else None,
+                                        "ok": ok and not sync.get("errors")}
+            if not ok:
+                out["warnings"].append("Panel zamówień nie pobiera zamówień ze sklepów" + (f" od {fmt_short(last)}" if last else ""))
+            for err in sync.get("errors") or []:
+                out["warnings"].append(f"Synchronizacja sklepu: {err}")
+    except Exception as e:
+        out["sources"]["sklepy"] = {"label": "Sklepy (panel zamówień)", "last": None, "ok": False}
+        out["warnings"].append(f"Panel zamówień niedostępny: {str(e)[:120]}")
+    try:
         wd = await db.get_setting("wa_watchdog", {}) or {}
     except Exception:
         wd = {}
@@ -67,5 +84,6 @@ def health_instruction(health: dict) -> str:
         return ""
     lines = "; ".join(health["warnings"])
     return ("UWAGA — dane niepełne: " + lines + ". Zacznij raport (pierwsze zdanie podsumowania) od krótkiego "
-            "ostrzeżenia o tym i o skutku: odpowiedzi Dominika z tego kanału nie są widoczne, więc sprawy z niego mogą "
-            "wyglądać na otwarte, choć są załatwione. Nie pisz „brak nowych rozmów”, gdy źródło po prostu nie działa.")
+            "ostrzeżenia o tym i o skutku. Dla WhatsAppa / Gmaila: odpowiedzi Dominika z tego kanału nie są widoczne, "
+            "więc sprawy z niego mogą wyglądać na otwarte, choć są załatwione — nie pisz „brak nowych rozmów”, gdy "
+            "źródło po prostu nie działa. Dla sklepów: dzisiejsza sprzedaż może być niepełna.")

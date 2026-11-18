@@ -169,6 +169,16 @@ async def build_day(db, ref: date | None = None, os_snapshot=None) -> dict:
     except Exception as e:
         logger.warning(f"Day view: OS unavailable: {e}")
 
+    sales = None
+    try:
+        from src.connectors.panel_erp import PanelERPClient
+
+        panel = PanelERPClient()
+        if panel.configured:
+            sales = await panel.today_so_far()
+    except Exception as e:
+        logger.warning(f"Day view: today's sales unavailable: {e}")
+
     plan = sorted(rows, key=sort_key)
     closed = await db.resolved_since(start, limit=30)
     try:
@@ -190,6 +200,7 @@ async def build_day(db, ref: date | None = None, os_snapshot=None) -> dict:
         "closed": closed,
         "warnings": health.get("warnings", []),
         "counts": counts,
+        "sales": sales,
     }
 
 
@@ -198,6 +209,12 @@ def day_text(d: dict) -> str:
     out = [f"Dziś {d['day'].strftime('%d.%m.%Y')} (stan na {to_local(d['now']).strftime('%H:%M')})"]
     if d["warnings"]:
         out.append("UWAGA: " + "; ".join(d["warnings"]))
+    if d.get("sales"):
+        t = d["sales"]["razem"]
+        per = ", ".join(f"{k} {v['zamowienia']} zam./{v['wartosc_zl']:,.0f} zł".replace(",", " ")
+                        for k, v in d["sales"]["sklepy"].items())
+        out.append(f"Sprzedaż dziś do tej pory: {t['zamowienia']} zam., {t['wartosc_zl']:,.0f} zł".replace(",", " ")
+                   + (f" ({per})" if per else ""))
     out.append("\nKalendarz:")
     out += [f"  {'cały dzień' if e['all_day'] else e['start'] + (('–' + e['end']) if e['end'] else '')} {e['title']}"
             + (f" ({e['where']})" if e["where"] else "") for e in d["events"]] or ["  (nic)"]

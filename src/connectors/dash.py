@@ -33,6 +33,8 @@ SHOP_BRAND = {s["shop"]: s["brand"] for s in SHOPS}
 SHOP_LABEL = {s["shop"]: s["label"] for s in SHOPS}
 # The dash names Shoper store -3 "shoper_unknown" (it only knows -1/-2); NOMO test orders land in "unknown"
 SHOP_ALIASES = {"shoper_unknown": "mojepostel.cz"}
+# mojepostel.cz sells in CZK, but IdeaERP (and so the dash) records its amounts as PLN — converted here
+SHOP_REAL_CURRENCY = {"shoper_unknown": "CZK"}
 # Meta ad account → shop (dash app src/lib/meta-ads.ts + accounts added later). Overridable in the panel / MCP
 # (settings "ad_accounts"); an account missing here is reported as unassigned, never silently mixed into another shop.
 META_ACCOUNT_SHOP = {
@@ -152,7 +154,12 @@ class DashClient:
         rev, meta, google, rooms = got["rev"], got["meta"], got["google"], got["rooms"]
         if isinstance(rev, Exception):
             raise rev
-        rev = alias_shops(rev)
+        rates = None
+        if any(r.get("source_shop") in SHOP_REAL_CURRENCY for r in rev):
+            from src.common.fx import pln_rates
+
+            rates = await pln_rates()
+        rev = alias_shops(rev, rates)
         for name, res in (("Meta", meta), ("Google (GA4)", google), ("showroomy", rooms)):
             if isinstance(res, Exception):
                 logger.warning(f"dash: {name} unavailable: {res}")
@@ -179,16 +186,27 @@ class DashClient:
             if erp:
                 rev = [r for r in rev if r.get("date") != ref.isoformat()] + erp["rows"]
                 missing.discard("sales")
-                sales_source, unknown_shops = "IdeaERP", erp["unknown_shops"]
+                sales_source, unknown_shops = erp.get("source") or "IdeaERP", erp["unknown_shops"]
         return build_overview(rev, ads, [] if isinstance(rooms, Exception) else rooms, ref, missing=missing,
                               failed=failed, sales_source=sales_source, unknown_shops=unknown_shops,
                               basis=self.revenue_basis)
 
     async def _erp_sales(self, ref: date, rev: list[dict]) -> dict | None:
-        """Yesterday's sales straight from IdeaERP while the dash has not loaded them yet. A main shop the ERP
-        does not return (while it normally sells every day) is marked unknown, never shown as 0."""
+        """Yesterday's sales while the dash has not loaded them yet: from the new ERP (shop APIs, complete for all
+        shops), else straight from IdeaERP — where a main shop it does not return (while it normally sells every
+        day) is marked unknown, never shown as 0."""
         from src.common.config import load_config
         from src.connectors.ideaerp import erp_daily_sales
+        from src.connectors.panel_erp import COMPLETE_SINCE, PanelERPClient
+
+        panel = PanelERPClient()
+        if panel.configured and ref >= COMPLETE_SINCE:
+            try:
+                rows = await panel.daily_sales(ref)
+                if rows:
+                    return {"rows": rows, "unknown_shops": set(), "source": "panel zamówień (API sklepów)"}
+            except Exception as e:
+                logger.warning(f"Panel (shop APIs) fallback for {ref}: {e}")
 
         rates = [_f(r["revenue_gross_pln"]) / _f(r["revenue_gross_original"]) for r in rev
                  if r.get("original_currency") == "EUR" and _f(r.get("revenue_gross_original"))]
@@ -208,7 +226,7 @@ class DashClient:
         if unknown:
             logger.info(f"IdeaERP fallback {ref}: no orders for {sorted(unknown)} (ERP shops: {erp['shops']}, "
                         f"order number field: {erp['ref_key']})")
-        return {"rows": erp["rows"], "unknown_shops": unknown}
+        return {"rows": erp["rows"], "unknown_shops": unknown, "source": "IdeaERP"}
 
 
 def _f(v) -> float:
@@ -222,10 +240,18 @@ def _pct(a: float, b: float) -> float | None:
     return round((a - b) / b * 100, 1) if b else None
 
 
-def alias_shops(rows: list[dict]) -> list[dict]:
-    """Warehouse shop names → our shop keys (Shoper store -3 = mojepostel.cz). Rows of the same day and shop are summed."""
+def alias_shops(rows: list[dict], rates: dict | None = None) -> list[dict]:
+    """Warehouse shop names → our shop keys (Shoper store -3 = mojepostel.cz). Rows of the same day and shop are summed.
+    With `rates`, amounts the ERP labelled PLN although the shop sells in another currency are converted
+    (mojepostel.cz: CZK)."""
     out: dict[tuple, dict] = {}
     for r in rows:
+        real = SHOP_REAL_CURRENCY.get(r.get("source_shop"))
+        if real and rates and (r.get("original_currency") or "PLN") == "PLN":
+            rate = rates.get(real) or 1.0
+            r = {**r, "original_currency": real, "revenue_gross_original": _f(r.get("revenue_gross_pln")),
+                 **{k: round(_f(r.get(k)) * rate, 2) for k in ("revenue_gross_pln", "revenue_paid_pln",
+                                                              "avg_order_value_pln") if r.get(k) is not None}}
         shop = SHOP_ALIASES.get(r.get("source_shop"), r.get("source_shop"))
         key = (r.get("date"), shop)
         if key not in out:

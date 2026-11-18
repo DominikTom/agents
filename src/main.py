@@ -146,6 +146,35 @@ async def erp_check(day: str | None, config: dict) -> None:
               f"{w.get('orders_count', '—'):>11}{round(float(w['revenue_gross_pln'])) if w else '—':>14}")
 
 
+async def panel_check(day: str | None) -> None:
+    """Sales of one day per shop from the new ERP (shop APIs) next to the dash — to verify the panel connection."""
+    from datetime import date as _date
+
+    from src.common.timeutil import today
+    from src.connectors.dash import DashClient
+    from src.connectors.panel_erp import PanelERPClient
+
+    d = _date.fromisoformat(day) if day else today()
+    panel = PanelERPClient()
+    print(f"Panel: {panel.rest.url} · klucz: {'jest' if panel.rest.key else 'BRAK'}")
+    print("synchronizacja sklepów:", await panel.sync_status())
+    rows = {r["source_shop"]: r for r in await panel.daily_sales(d)}
+    dash = DashClient()
+    dash_rows = {}
+    if dash.configured:
+        from src.connectors.dash import alias_shops
+        from src.common.fx import pln_rates
+
+        dash_rows = {r["source_shop"]: r for r in alias_shops(await dash.revenue(d, d), await pln_rates())}
+    print(f"Dzień {d}")
+    print(f"{'sklep':<16}{'API zam.':>9}{'API zł':>12}{'opłac. zł':>12}{'dash zam.':>11}{'dash zł':>12}")
+    for shop in sorted(set(rows) | set(dash_rows)):
+        a, w = rows.get(shop, {}), dash_rows.get(shop, {})
+        print(f"{shop:<16}{a.get('orders_count', '—'):>9}{round(a['revenue_gross_pln']) if a else '—':>12}"
+              f"{round(a['revenue_paid_pln']) if a else '—':>12}{w.get('orders_count', '—'):>11}"
+              f"{round(float(w['revenue_gross_pln'])) if w else '—':>12}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="MyBed Agents")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -163,6 +192,8 @@ def main() -> None:
     dc.add_argument("day", nargs="?", help="YYYY-MM-DD, default yesterday")
     erp = sub.add_parser("erp-check", help="Compare a day's sales: IdeaERP vs dash (per shop)")
     erp.add_argument("day", nargs="?", help="YYYY-MM-DD, default yesterday")
+    pc = sub.add_parser("panel-check", help="A day's sales per shop from the new ERP (shop APIs) vs dash")
+    pc.add_argument("day", nargs="?", help="YYYY-MM-DD, default today")
 
     args = parser.parse_args()
     config = load_config()
@@ -180,6 +211,8 @@ def main() -> None:
         asyncio.run(dash_check(args.day))
     elif args.command == "erp-check":
         asyncio.run(erp_check(args.day, config))
+    elif args.command == "panel-check":
+        asyncio.run(panel_check(args.day))
 
 
 if __name__ == "__main__":

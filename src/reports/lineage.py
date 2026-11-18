@@ -85,10 +85,24 @@ SOURCES: dict[str, dict] = {
         "job": None,
         "health": None,
     },
+    "panel": {
+        "label": "Panel zamówień (nowy ERP)",
+        "icon": "store",
+        "what": "Zamówienia prosto z API sklepów: mybed.pl, mybed.de, mojepostel.cz (Shoper), mittohome.pl (Shopify), "
+                "nomosleep.pl (Medusa) — tabela sklep_zamowienia w Supabase panel-zamowien. Tylko pola zamówienia "
+                "(sklep, data, status, opłacone, kwota, waluta), bez danych klientów.",
+        "how": "Panel pobiera sklepy co 10 min; agenci czytają przy raporcie, na stronie Dziś i w MCP. Waluta sklepu "
+               "przeliczana kursem NBP (mojepostel.cz sprzedaje w CZK). Komplet dla wszystkich sklepów od 9.11.2026.",
+        "cadence": "co 10 min",
+        "processing": "„Dziś do tej pory” w podsumowaniu dnia, na stronie Dziś i w MCP; wczorajsza sprzedaż, gdy dash "
+                      "jeszcze się nie załadował.",
+        "job": None,
+        "health": None,
+    },
     "ideaerp": {
         "label": "IdeaERP",
         "icon": "store",
-        "what": "Dzisiejsze zamówienia i przychód (do tej pory) — jedyne źródło danych z bieżącego dnia.",
+        "what": "Zapasowe źródło dzisiejszych zamówień, gdy panel zamówień nie jest skonfigurowany.",
         "how": "API IdeaERP; sklep rozpoznajemy po numerze zamówienia (Shoper…-1/-2/-3, Shopify…, NOMO-…), nie po spółce w ERP.",
         "cadence": "co godzinę (:05)",
         "processing": "Podsumowanie dnia i tygodnia pokazują „dziś do tej pory”.",
@@ -113,7 +127,7 @@ SOURCES: dict[str, dict] = {
 # report section -> sources it reads ("ai" = synthesis over everything above)
 SECTION_SOURCES: dict[str, list[str]] = {
     "top": ["ai"],
-    "sales": ["dash", "ideaerp"],
+    "sales": ["dash", "panel", "ideaerp"],
     "marketing": ["dash", "ga4"],
     "showrooms": ["dash"],
     "calendar": ["calendar"],

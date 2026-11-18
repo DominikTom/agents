@@ -15,6 +15,17 @@
 </div>
 {% endif %}
 
+{% if d.sales %}
+<div class="card mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-2.5 text-sm">
+  <span class="flex items-center gap-1.5 font-semibold text-ink">{{ icon("shopping-cart", "text-ink-faint") }}Sprzedaż dziś</span>
+  <span><span class="font-mono font-semibold text-ink">{{ d.sales.razem.wartosc_zl|pln }}</span> <span class="text-ink-muted">· {{ d.sales.razem.zamowienia }} zam.</span></span>
+  {% for shop, v in d.sales.sklepy.items() %}
+  <span class="text-xs text-ink-muted">{{ {"mittohome.pl": "MittoHome", "nomosleep.pl": "NOMO"}.get(shop, shop) }} <span class="font-mono text-ink">{{ v.wartosc_zl|pln }}</span> ({{ v.zamowienia }})</span>
+  {% endfor %}
+  <span class="ml-auto text-[11px] text-ink-faint">API sklepów{% if d.sales.ostatnia_synchronizacja %} · {{ d.sales.ostatnia_synchronizacja[11:16] }} UTC{% endif %}</span>
+</div>
+{% endif %}
+
 <div class="mb-4 flex flex-wrap gap-2">
   {% for k, lbl in [("decyzja", "Decyzje"), ("odpowiedz", "Odpowiedzi"), ("zadanie", "Do zrobienia"), ("os", "Zadania OS"), ("czekam", "Czekasz na")] %}
   <button type="button" class="chip" data-filter="{{ k }}" onclick="setFilter('{{ k }}')">

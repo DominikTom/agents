@@ -88,7 +88,8 @@ async def get_sales(days: int = 7, store: str | None = None) -> str:
     """Sprzedaż per sklep z hurtowni dash: zamówienia, przychód, średni koszyk, zmiana % do poprzedniego okresu
     o tej samej długości, plus reklamy (Meta, Google) w tym okresie. days: 1 | 3 | 7 | 30 (najbliższy).
     store: mybed.pl | mybed.de | mojepostel.cz | mittohome.pl | nomosleep.pl (puste = wszystkie + Razem).
-    Marki: MyBed = mybed.pl + mybed.de + mojepostel.cz, MittoHome, NOMO (nomosleep.pl). Dziś do tej pory: z IdeaERP."""
+    Marki: MyBed = mybed.pl + mybed.de + mojepostel.cz, MittoHome, NOMO (nomosleep.pl). Dziś do tej pory: na żywo
+    z API sklepów (nowy ERP — panel zamówień, co 10 min)."""
     from src.connectors.dash import DashClient, SHOP_BRAND
 
     db = _get_db()
@@ -113,12 +114,11 @@ async def get_sales(days: int = 7, store: str | None = None) -> str:
     }
     if o.get("missing_note"):
         out["uwaga"] = o["missing_note"]
-    today_rows = await db.get_metrics(since=date.today(), until=date.today())
-    if today_rows:
-        live: dict = {}
-        for r in today_rows:
-            live.setdefault(r["store"], {})[r["metric_name"]] = float(r["metric_value"])
-        out["dzis_do_tej_pory_ideaerp"] = live
+    from src.reports.sections import today_so_far
+
+    live = await today_so_far(db)
+    if live:
+        out["dzis_do_tej_pory"] = live
     return json.dumps(out, ensure_ascii=False, indent=1, default=str)
 
 

@@ -100,16 +100,31 @@ async def build_sales(ctx: ReportContext) -> dict:
     except Exception as e:
         out["dash_blad"] = str(e)
     if ctx.kind in ("wrap", "weekly"):
-        # Today so far from IdeaERP (hourly metrics)
-        rows = await ctx.db.get_metrics(since=ctx.today, until=ctx.today)
-        today_rows: dict[str, dict] = {}
-        for r in rows:
-            today_rows.setdefault(r["store"], {"currency": r.get("currency")})[r["metric_name"]] = float(r["metric_value"])
-        if today_rows:
-            out["dzis_do_tej_pory_ideaerp"] = today_rows
+        live = await today_so_far(ctx.db)
+        if live:
+            out["dzis_do_tej_pory"] = live
     if "dash_blad" in out and len(out) == 1:
         raise RuntimeError(out["dash_blad"])
     return out
+
+
+async def today_so_far(db) -> dict | None:
+    """Today's orders per shop: live from the shops' APIs (new ERP, every 10 min); else IdeaERP hourly metrics."""
+    from src.connectors.panel_erp import PanelERPClient
+
+    panel = PanelERPClient()
+    if panel.configured:
+        try:
+            return await panel.today_so_far()
+        except Exception as e:
+            logger.warning(f"Today's sales from the panel failed: {e}")
+    from src.common.timeutil import today
+
+    rows = await db.get_metrics(since=today(), until=today())
+    by_store: dict[str, dict] = {}
+    for r in rows:
+        by_store.setdefault(r["store"], {"currency": r.get("currency")})[r["metric_name"]] = float(r["metric_value"])
+    return {"zrodlo": "IdeaERP (co godzinę)", "sklepy": by_store} if by_store else None
 
 
 async def build_marketing(ctx: ReportContext) -> dict:
