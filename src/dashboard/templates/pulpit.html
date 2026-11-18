@@ -64,6 +64,40 @@
   {% endif %}
 </div>
 
+{# ── Finanse Delty z CFO Studio (wynik realny, marża I, prognoza, koszt w produkcji) ── #}
+{% if cfo %}
+<section class="card mb-6 overflow-hidden">
+  {{ panel_head("Finanse · CFO Studio", href=cfo.url, link_label="Otwórz CFO Studio", icon_name="chart-line") }}
+  {% if cfo.ok %}
+  <div class="grid grid-cols-2 [&>*]:min-w-0 gap-3 p-4 lg:grid-cols-4">
+    {{ stat("Wynik realny · " ~ cfo.month, cfo.wynik_realny|pln, cfo.wynik_realny_pct ~ " przychodu · Incro " ~ (cfo.wynik_incro|pln)) }}
+    {{ stat("Marża I realna · 3M", cfo.marza1_realna_3m, "księgi Incro " ~ cfo.marza1_incro_3m ~ " · 3M realny " ~ (cfo.wynik_realny_3m|pln)) }}
+    {% if cfo.prognoza %}
+    {{ stat("Prognoza · " ~ cfo.prognoza.month, cfo.prognoza.wynik|pln, "dzień " ~ cfo.prognoza.dni ~ " · MTD " ~ (cfo.prognoza.wynik_mtd|pln) ~ " · przychód " ~ (cfo.prognoza.przychod|pln)) }}
+    {% else %}
+    {{ stat("Prognoza", "—", "brak prognozy w CFO Studio") }}
+    {% endif %}
+    {% if cfo.produkcja %}
+    {{ stat("W produkcji u producentów", cfo.produkcja.koszt|pln, (cfo.produkcja.zamowienia|num) ~ " zam. · gotowe " ~ (cfo.produkcja.gotowe|pln)) }}
+    {% elif cfo.ytd %}
+    {{ stat("Wynik realny · YTD " ~ cfo.ytd.rok, cfo.ytd.wynik_realny|pln, "Incro " ~ (cfo.ytd.wynik_incro|pln)) }}
+    {% endif %}
+  </div>
+  {% if cfo.alerty %}
+  <div class="border-t border-line px-4 py-2.5">
+    {% for a in cfo.alerty[:4] %}
+    <p class="flex items-start gap-2 py-0.5 text-xs {{ 'text-red-700' if a.level == 'error' else 'text-amber-700' }}">
+      {{ icon("triangle-alert", "mt-0.5 h-3.5 w-3.5 shrink-0") }}<span><span class="font-medium">{{ a.title }}</span> — {{ a.message }}</span>
+    </p>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% else %}
+  <p class="flex items-center gap-2 px-4 py-3 text-sm text-amber-700">{{ icon("triangle-alert", "h-4 w-4 shrink-0") }} {{ cfo.error }}</p>
+  {% endif %}
+</section>
+{% endif %}
+
 <div class="grid grid-cols-1 gap-5 xl:grid-cols-3">
   <div class="space-y-5 xl:col-span-2">
 

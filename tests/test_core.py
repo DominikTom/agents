@@ -876,3 +876,49 @@ def test_day_plan_focus_keeps_today_and_moves_old_items_to_rest():
     assert not in_focus({"kind": "zadanie", "since": old}, ref)
     assert not in_focus({"kind": "czekam", "since": fresh}, ref) and in_focus({"kind": "czekam", "due_today": True}, ref)
     assert [day_label(ref + timedelta(days=i), ref) for i in range(3)] == ["Dziś", "Jutro", "pt 20.11"]
+
+
+def test_cfo_studio_summary_from_overview():
+    from src.connectors.cfo_studio import month_label, pct_label, summarize
+
+    ov = {
+        "zamkniete_miesiace": [
+            {"month": "2026-08-01", "wynik_realny": 819177.7},
+            {"month": "2026-09-01", "incro_raport": True, "wynik_realny": 929164.6, "wynik_incro": 782456.58,
+             "wynik_realny_ksiegi": 826049.1, "wynik_realny_pct": 14.6, "wynik_realny_3m": 2633005.24,
+             "marza1_realna_3m_pct": 51.4, "marza1_incro_3m_pct": 55.5},
+        ],
+        "ytd": {"rok": "2026", "wynik_realny": 5015557.72, "wynik_incro": 4900514.59},
+        "prognoza_biezacego_miesiaca": {"as_of": "2026-11-17", "month": "2026-11-01", "days_in_month": 30, "days_elapsed": 17,
+                                        "wynik_prognoza": 872891, "wynik_mtd": 452405, "przychod_prognoza": 5948122,
+                                        "przychod_mtd": 3257044},
+        "przychod_mtd_vs_m1_rok_temu": [{"okres": "mtd", "do": "2026-11-17", "przychod_netto": 3257044},
+                                        {"okres": "m1", "przychod_netto": 3000000}, {"okres": "y1", "przychod_netto": 0}],
+        "w_produkcji": [{"grupa": "sklep", "etap": "w_produkcji", "koszt": 2000000, "zamowienia": 1800},
+                        {"grupa": "sklep", "etap": "gotowe", "koszt": 250000, "zamowienia": 200},
+                        {"grupa": "zam", "etap": "w_produkcji", "koszt": 100000, "zamowienia": 40}],
+        "alerty": [{"code": "bank_wyciagi", "level": "warning", "title": "Brak nowych wyciągów", "message": "…"}],
+    }
+    s = summarize(ov)
+    assert s["ok"] and s["month"] == "wrzesień 2026" and s["wynik_realny"] == 929164.6
+    assert s["marza1_realna_3m"] == "51,4%" and s["wynik_realny_pct"] == "14,6%"
+    assert s["prognoza"]["dni"] == "17/30" and s["prognoza"]["month"] == "listopad 2026"
+    assert s["mtd"]["vs_m1_pct"] == 8.6 and s["mtd"]["vs_y1_pct"] is None
+    assert s["produkcja"] == {"koszt": 2000000.0, "zamowienia": 1800, "gotowe": 250000.0}
+    assert s["alerty"][0]["level"] == "warning"
+    assert summarize({})["prognoza"] is None and summarize({})["month"] == ""
+    assert month_label(None) == "" and pct_label(None) == "—"
+
+
+def test_finance_section_is_registered_everywhere():
+    from src.reports.lineage import SECTION_SOURCES, SOURCES
+    from src.reports.sections import BUILDERS
+
+    assert "finance" in SECTION_CATALOG and "finance" in BUILDERS
+    assert SECTION_SOURCES["finance"] == ["cfo_studio"] and "cfo_studio" in SOURCES
+    for p in DEFAULT_PROFILES.values():
+        assert any(sec["key"] == "finance" for sec in p["sections"])
+    # saved profiles from before get the new section appended, switched off
+    merged = merge_profiles({"morning_briefing": {"sections": [{"key": "top", "enabled": True}]}})
+    fin = [sec for sec in merged["morning_briefing"]["sections"] if sec["key"] == "finance"]
+    assert fin and fin[0]["enabled"] is False

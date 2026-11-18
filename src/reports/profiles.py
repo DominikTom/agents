@@ -31,6 +31,12 @@ SECTION_CATALOG: dict[str, dict] = {
         "instruction": "Tabela: wiersz = sklep (mybed.pl, mybed.de, MittoHome, NOMO; mojepostel.cz tylko gdy wydaje), kolumny: Meta, Google Ads, Suma — za wczoraj i za 7 dni (w zł). Pod tabelą wiersz „Razem”. Nie licz MER ani ROAS. Potem 1–2 zdania tylko o tym, co odstaje. Jeśli w danych są „nieprzypisane_konta”, napisz wprost, które konto reklamowe wydaje i nie jest przypisane do sklepu — nie doliczaj go do żadnej marki.",
         "data": True,
     },
+    "finance": {
+        "label": "Finanse (CFO Studio)",
+        "description": "Wynik realny ostatniego zamkniętego miesiąca vs księgi Incro i 3M, marża I, prognoza bieżącego miesiąca, koszt zamówień w produkcji i alerty — z CFO Studio (tylko Delta Industries / MyBed).",
+        "instruction": "2–4 zdania: wynik realny ostatniego zamkniętego miesiąca vs Incro i krocząco 3M, marża I realna 3M vs księgi, prognoza bieżącego miesiąca (wynik i przychód, który to dzień miesiąca), koszt zamówień w produkcji; alerty CFO jednym zdaniem. Liczby bierz dokładnie z danych, nie przeliczaj. Nie oceniaj pojedynczego miesiąca bez 3M. To finanse spółki Delta Industries (MyBed: mybed.pl, mybed.de) — bez MittoHome i NOMO.",
+        "data": True,
+    },
     "showrooms": {
         "label": "Showroomy",
         "description": "Sprzedaż showroomów z ostatnich 7 dni.",
@@ -165,7 +171,7 @@ DEFAULT_PROFILES: dict[str, dict] = {
         "kpi": _kpi(["1", "7", "30"], ["revenue", "orders", "aov", "spend_meta", "spend_google", "spend_total"]),
         "sections": _sections(
             ["top", "calendar", "awaiting", "commitments", "sales", "marketing", "team_updates"],
-            ["chats", "os_me", "team", "email", "projects", "showrooms", "topics", "risks", "plan", "slack"],
+            ["chats", "os_me", "team", "email", "projects", "showrooms", "topics", "risks", "plan", "slack", "finance"],
         ),
     },
     "daily_wrap": {
@@ -184,7 +190,7 @@ DEFAULT_PROFILES: dict[str, dict] = {
         "sections": _sections(
             ["top", "awaiting", "commitments", "calendar", "sales"],
             ["topics", "chats", "risks", "plan", "email", "marketing", "os_me", "team", "team_updates", "projects",
-             "showrooms", "slack"],
+             "showrooms", "slack", "finance"],
         ),
     },
     "weekly_review": {
@@ -201,7 +207,7 @@ DEFAULT_PROFILES: dict[str, dict] = {
         "instructions": "",
         "kpi": _kpi(["7", "30"], ["revenue", "orders", "aov", "spend_meta", "spend_google", "spend_total"]),
         "sections": _sections(
-            ["top", "sales", "marketing", "showrooms", "projects", "team", "team_updates", "topics", "chats", "commitments", "risks", "calendar", "plan"],
+            ["top", "sales", "marketing", "finance", "showrooms", "projects", "team", "team_updates", "topics", "chats", "commitments", "risks", "calendar", "plan"],
             ["awaiting", "email", "os_me", "slack"],
         ),
     },

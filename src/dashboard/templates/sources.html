@@ -59,6 +59,11 @@
       ([("Dane za", dash.date), ("Przychód", dash.total.revenue|pln), ("Wydatki reklam", dash.marketing.spend_day|pln)] if dash else [("Supabase", "hurtownia danych")]),
       hint=None if config.dash else "Dodaj <span class='font-mono'>DASH_SUPABASE_SERVICE_KEY</span> do .env. Raporty dostaną sprzedaż per sklep, wydatki Meta i Google Ads per sklep oraz showroomy.") }}
 
+  {{ source_card("CFO Studio — finanse Delty", "chart-line", ("ok" if cfo.ok else "error") if cfo else "off",
+      ([("Ostatni zamknięty miesiąc", cfo.month), ("Wynik realny", cfo.wynik_realny|pln), ("Alerty CFO", cfo.alerty|length)] if cfo and cfo.ok else [("Serwer", "mybed-cfo-studio.vercel.app")]),
+      href=cfo.url if cfo else None, action_label="Otwórz",
+      hint=(cfo.error|e if cfo and not cfo.ok else (None if config.cfo_studio else "Utwórz klucz w CFO Studio → MCP / czat → Klucze API i dodaj go jako <span class='font-mono'>CFO_STUDIO_API_KEY</span> do .env. Pulpit dostanie kartę Finanse, raporty sekcję Finanse, a MCP narzędzia cfo_*."))) }}
+
   {% set erp = runs.get("ideaerp_sync") %}
   {{ source_card("IdeaERP — dzisiejsze zamówienia", "store", ("error" if erp and erp.status == "error" else "ok") if config.ideaerp else "off",
       [("Ostatni sync", erp.ran_at|ago if erp else "—")], action="/api/jobs/ideaerp_sync/run" if config.ideaerp else None) }}
