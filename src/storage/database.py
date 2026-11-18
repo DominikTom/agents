@@ -277,6 +277,8 @@ ALTER TABLE commitments ADD COLUMN IF NOT EXISTS xchecked_at TIMESTAMPTZ;
 ALTER TABLE commitments ADD COLUMN IF NOT EXISTS note TEXT;
 -- the item only makes sense until a moment (a call at 10:00, "before the meeting") — dropped once its day is over
 ALTER TABLE commitments ADD COLUMN IF NOT EXISTS time_bound BOOLEAN DEFAULT FALSE;
+-- when the resolver last judged the item AFTER its deadline had passed (one look per passed deadline)
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS due_checked_at TIMESTAMPTZ;
 
 -- What Dominik told the agents himself (MCP chat / panel): facts and decisions that settle open items
 -- and that reports treat as authoritative ("umowa Eli podpisana", "Comfy: płacimy w 3 ratach")
@@ -1346,15 +1348,17 @@ class Database:
             "ORDER BY resolved_at DESC LIMIT $2", since, limit,
         )
 
-    async def get_crosscheck_candidates(self, limit: int = 120) -> list[dict]:
+    async def get_crosscheck_candidates(self, limit: int = 300) -> list[dict]:
         """Open items for the cross-source check (all sources), newest first."""
         return await self._fetchall(
             "SELECT * FROM commitments WHERE status = 'open' AND NOT COALESCE(keep_open, FALSE) "
             "ORDER BY COALESCE(source_at, created_at) DESC LIMIT $1", limit,
         )
 
-    async def mark_crosschecked(self, ids: list[int]) -> None:
+    async def mark_crosschecked(self, ids: list[int], due_checked: list[int] | None = None) -> None:
         await self._execute("UPDATE commitments SET xchecked_at = NOW() WHERE id = ANY($1::int[])", ids)
+        if due_checked:
+            await self._execute("UPDATE commitments SET due_checked_at = NOW() WHERE id = ANY($1::int[])", due_checked)
 
     async def find_evidence(self, since: datetime, terms: list[str], entity_id: int | None = None,
                             emails: list[str] | None = None, limit: int = 10) -> list[dict]:

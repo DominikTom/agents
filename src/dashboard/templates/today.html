@@ -45,7 +45,8 @@ function setFilter(k) { filterKind = filterKind === k ? '' : k; applyFilter() }
 async function refreshDay() {
   if (document.hidden || document.querySelector('#day-root button[disabled]')) return
   try {
-    const res = await fetch('/dzis?partial=1', { headers: { 'X-Partial': '1' } })
+    const cal = new URLSearchParams(location.search).get('cal') || ''
+    const res = await fetch('/dzis?partial=1&cal=' + encodeURIComponent(cal), { headers: { 'X-Partial': '1' } })
     if (res.status === 401) return
     if (!res.ok) return
     document.getElementById('day-root').innerHTML = await res.text()

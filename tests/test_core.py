@@ -640,8 +640,9 @@ def test_resolver_closes_only_with_evidence_and_respects_verdicts():
         async def auto_close_commitment(self, cid, status, reason):
             self.closed.append((cid, status, reason))
 
-        async def mark_crosschecked(self, ids):
+        async def mark_crosschecked(self, ids, due_checked=None):
             self.checked.extend(ids)
+            self.due_checked = list(due_checked or [])
 
     class FakeAI:
         calls = []
@@ -810,7 +811,7 @@ def test_resolver_looks_once_at_an_item_whose_deadline_passed():
     past = today() - timedelta(days=2)
     item = {"id": 5, "direction": "ask", "title": "Uprzedź Wojtka Zyzaka o telefonie od Kamila (Thulium) dziś ok. 10:00",
             "counterpart": "Kamil Kokoszka", "source": "gmail", "chat_name": "Thulium", "source_at": t,
-            "due_date": past, "xchecked_at": None}
+            "due_date": past, "xchecked_at": datetime.now(timezone.utc), "due_checked_at": None}  # seen today by older code
 
     class FakeDB:
         closed, checked, expired_called = [], [], []
@@ -837,8 +838,9 @@ def test_resolver_looks_once_at_an_item_whose_deadline_passed():
         async def auto_close_commitment(self, cid, status, reason):
             self.closed.append((cid, status))
 
-        async def mark_crosschecked(self, ids):
+        async def mark_crosschecked(self, ids, due_checked=None):
             self.checked.extend(ids)
+            self.due_checked = list(due_checked or [])
 
     class FakeAI:
         prompts = []
@@ -850,9 +852,27 @@ def test_resolver_looks_once_at_an_item_whose_deadline_passed():
     db, ai = FakeDB(), FakeAI()
     asyncio.run(ItemResolver(db, ai).run())
     assert db.closed == [(5, "dismissed")] and db.expired_called and "PO TERMINIE" in ai.prompts[0]
-    # checked after the deadline already → no second look without new evidence
-    item["xchecked_at"] = datetime.now(timezone.utc)
+    assert db.due_checked == [5]
+    # judged after the deadline already → no second look without new evidence
+    item["due_checked_at"] = datetime.now(timezone.utc)
     ai.prompts.clear()
     asyncio.run(ItemResolver(db, ai).run())
     assert ai.prompts == []
     assert not ItemResolver._due_passed_since_check({"due_date": date(2099, 1, 1), "xchecked_at": None})
+
+
+def test_day_plan_focus_keeps_today_and_moves_old_items_to_rest():
+    from datetime import date, datetime, timedelta, timezone
+
+    from src.processing.day_view import day_label, in_focus
+
+    ref = date(2026, 11, 18)
+    old = datetime(2026, 11, 2, 9, tzinfo=timezone.utc)
+    fresh = datetime(2026, 11, 17, 15, tzinfo=timezone.utc)
+    assert in_focus({"kind": "decyzja", "since": old}, ref)
+    assert in_focus({"kind": "zadanie", "since": fresh}, ref)
+    assert in_focus({"kind": "zadanie", "since": old, "overdue": True, "due": "2026-11-06"}, ref)
+    assert not in_focus({"kind": "zadanie", "since": old, "overdue": True, "due": "2026-10-20"}, ref)
+    assert not in_focus({"kind": "zadanie", "since": old}, ref)
+    assert not in_focus({"kind": "czekam", "since": fresh}, ref) and in_focus({"kind": "czekam", "due_today": True}, ref)
+    assert [day_label(ref + timedelta(days=i), ref) for i in range(3)] == ["Dziś", "Jutro", "pt 20.11"]

@@ -27,8 +27,8 @@ from src.storage.database import Database, _j
 logger = logging.getLogger(__name__)
 
 BATCH = 8
-MAX_ITEMS = 80
-MAX_CALLS = 4  # per run (every 15 min) — the rest waits for the next run
+MAX_ITEMS = 300
+MAX_CALLS = 5  # per run (every 15 min) — the rest waits for the next run
 EVIDENCE_PER_ITEM = 10
 NOTES_DAYS = 30
 
@@ -129,6 +129,8 @@ class ItemResolver:
                 stats["skipped"] += 1
                 continue
             todo.append((item, pack))
+        # items Dominik may just have settled first, then deadlines that passed; the rest waits for the next run
+        todo.sort(key=lambda ip: not self._has_new_evidence(*ip))
         todo = todo[:BATCH * MAX_CALLS]
         for i in range(0, len(todo), BATCH):
             batch = todo[i:i + BATCH]
@@ -146,7 +148,8 @@ class ItemResolver:
                 await self.db.auto_close_commitment(item["id"], "done" if v["status"] == "done" else "dismissed", reason)
                 stats[v["status"]] += 1
                 stats["closed"].append({"id": item["id"], "title": item["title"], "status": v["status"], "reason": reason})
-            await self.db.mark_crosschecked([item["id"] for item, _ in batch])
+            await self.db.mark_crosschecked([item["id"] for item, _ in batch],
+                                            [item["id"] for item, _ in batch if self._due_passed_since_check(item)])
             stats["checked"] += len(batch)
         if stats["done"] or stats["obsolete"]:
             logger.info(f"Items closed across sources: done {stats['done']}, obsolete {stats['obsolete']}")
@@ -157,7 +160,7 @@ class ItemResolver:
         due = item.get("due_date")
         if not due or due >= today():
             return False
-        last = item.get("xchecked_at")
+        last = item.get("due_checked_at")
         return last is None or to_local(last).date() <= due
 
     @staticmethod

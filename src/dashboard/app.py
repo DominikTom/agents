@@ -234,13 +234,13 @@ async def pulpit_page(request: Request):
 
 
 @app.get("/dzis", response_class=HTMLResponse)
-async def today_page(request: Request, partial: int = 0):
+async def today_page(request: Request, partial: int = 0, cal: str = "dzis"):
     if not authed(request):
         return unauthorized() if partial else login_redirect(request)
     from src.processing.day_view import build_day
 
     db = get_db_sync()
-    d = await build_day(db, os_snapshot=await data.os_snapshot())
+    d = await build_day(db, os_snapshot=await data.os_snapshot(), cal=cal)
     if partial:
         return templates.TemplateResponse(request, "_today_body.html", {"d": d})
     return render(request, "today.html", "today", d=d)

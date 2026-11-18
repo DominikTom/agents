@@ -35,16 +35,44 @@
 </div>
 
 <div class="grid grid-cols-1 gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
-  {# ── Mini calendar ── #}
+  {# ── Calendar: today / tomorrow (timeline) or 7 days (agenda) ── #}
   <section class="card order-2 overflow-hidden lg:order-1">
-    <div class="panel-head"><h3 class="section-title flex items-center gap-1.5">{{ icon("calendar", "text-ink-faint") }}Kalendarz</h3><span class="badge bg-surface-2 font-mono text-ink-muted">{{ d.events|length }}</span></div>
-    {% set all_day = d.events|selectattr("all_day")|list %}
+    <div class="panel-head">
+      <h3 class="section-title flex items-center gap-1.5">{{ icon("calendar", "text-ink-faint") }}Kalendarz</h3>
+      <div class="flex gap-1">
+        {% for k, lbl in d.calendar.modes.items() %}
+        <a href="?cal={{ k }}" class="rounded-md px-2 py-0.5 text-xs font-medium {{ 'bg-primary-soft text-primary-ink' if d.calendar.mode == k else 'text-ink-muted hover:bg-surface-2 hover:text-ink' }}">{{ lbl }}</a>
+        {% endfor %}
+      </div>
+    </div>
+    {% if d.calendar.mode == "tydzien" %}
+      {% for day in d.calendar.days %}
+      <div class="border-b border-line/70 px-3 py-2 last:border-0 {{ 'bg-surface-2/40' if day.weekend }}">
+        <div class="mb-1 flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide {{ 'text-primary-ink' if day.label == 'Dziś' else 'text-ink-faint' }}">
+          <span>{{ day.label }}{% if day.label in ("Dziś", "Jutro") %} · {{ day.day.strftime("%d.%m") }}{% endif %}</span>
+          <span class="font-mono normal-case">{{ day.events|length or "" }}</span>
+        </div>
+        {% for e in day.events %}
+        <a {% if e.link %}href="{{ e.link }}" target="_blank" rel="noopener"{% endif %} class="flex gap-2 rounded-md px-1 py-0.5 text-xs hover:bg-surface-2" title="{{ e.title }}{% if e.people %} · {{ e.people|join(', ') }}{% endif %}">
+          <span class="w-[86px] shrink-0 whitespace-nowrap font-mono text-ink-muted">{{ "cały dzień" if e.all_day else e.start ~ ("–" ~ e.end if e.end else "") }}</span>
+          <span class="min-w-0"><span class="font-medium text-ink">{{ e.title }}</span>{% if e.where %}<span class="block truncate text-ink-faint">{{ e.where }}</span>{% endif %}</span>
+        </a>
+        {% else %}
+        <div class="px-1 text-xs text-ink-faint">—</div>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    {% else %}
+    {% set cday = d.calendar.days[0] %}
+    {% set evs = cday.events %}
+    {% if d.calendar.mode == "jutro" %}<div class="border-b border-line px-3 py-1.5 text-xs text-ink-muted">{{ cday.day|datepl|capitalize }}</div>{% endif %}
+    {% set all_day = evs|selectattr("all_day")|list %}
     {% if all_day %}
     <div class="border-b border-line px-3 py-2 space-y-1">
       {% for e in all_day %}<div class="truncate rounded-md bg-surface-2 px-2 py-1 text-xs text-ink-muted">cały dzień · {{ e.title }}</div>{% endfor %}
     </div>
     {% endif %}
-    {% set timed = d.events|rejectattr("all_day")|list %}
+    {% set timed = evs|rejectattr("all_day")|list %}
     {% set first = [7 * 60] + timed|map(attribute="start_min")|select|list %}
     {% set last = [19 * 60] + timed|map(attribute="end_min")|select|list %}
     {% set t0 = (first|min // 60) * 60 %}
@@ -66,11 +94,14 @@
         {% if e.where %}<span class="block truncate text-primary-ink/70">{{ e.where }}</span>{% endif %}
       </a>
       {% endfor %}
+      {% if d.calendar.mode == "dzis" %}
       <div id="now-line" class="pointer-events-none absolute left-9 right-0 hidden border-t-2 border-red-500" data-start="{{ t0 }}" data-end="{{ t1 }}">
         <span class="absolute -left-1 -top-[5px] h-2 w-2 rounded-full bg-red-500"></span>
       </div>
+      {% endif %}
     </div>
-    {% if not d.events %}{{ empty("Dziś bez spotkań.", "calendar") }}{% endif %}
+    {% if not evs %}{{ empty("Bez spotkań.", "calendar") }}{% endif %}
+    {% endif %}
   </section>
 
   {# ── Plan of the day ── #}
@@ -118,6 +149,17 @@
     {% endif %}
 
     {% if not d.plan and not d.replies and not d.os %}{{ empty("Nic otwartego na dziś.", "circle-check") }}{% endif %}
+
+    {% if d.rest %}
+    <details class="border-t border-line">
+      <summary class="cursor-pointer select-none px-4 py-2.5 text-sm text-ink-muted hover:bg-surface-2">
+        Pozostałe otwarte sprawy <span class="badge ml-1 bg-surface-2 font-mono text-ink-muted">{{ d.rest|length }}</span>
+        <span class="ml-1 text-xs text-ink-faint">starsze, bez terminu na dziś — zamykają się same, gdy je załatwisz</span>
+      </summary>
+      {% for r in d.rest[:60] %}{% include "_today_item.html" %}{% endfor %}
+      {% if d.rest|length > 60 %}<a href="/commitments" class="block px-4 py-2 text-xs text-ink-muted hover:text-ink">Wszystkie ({{ d.rest|length }}) w Zobowiązaniach →</a>{% endif %}
+    </details>
+    {% endif %}
   </section>
 </div>
 

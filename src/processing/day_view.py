@@ -78,40 +78,87 @@ def sort_key(r: dict):
             -(to_local(r["since"]).timestamp() if isinstance(r.get("since"), datetime) else 0))
 
 
-async def build_day(db, ref: date | None = None, os_snapshot=None) -> dict:
+CAL_MODES = {"dzis": "Dziś", "jutro": "Jutro", "tydzien": "Tydzień"}
+_WD = ["pn", "wt", "śr", "cz", "pt", "sb", "nd"]
+# a day plan is what matters today — older items without a deadline wait in "pozostałe"
+FOCUS_OVERDUE_DAYS = 14
+
+
+def _event(e: dict) -> dict | None:
+    m = e.get("metadata") or {}
+    if m.get("my_status") == "declined":
+        return None
+    st = to_local(e["timestamp"])
+    end_ts = m.get("end")
+    try:
+        en = to_local(datetime.fromisoformat(end_ts)) if isinstance(end_ts, str) and "T" in end_ts else None
+    except ValueError:
+        en = None
+    return {
+        "title": e.get("title") or "(bez tytułu)",
+        "day": st.date() if st else None,
+        "all_day": bool(m.get("all_day")),
+        "start": st.strftime("%H:%M") if st else "",
+        "end": en.strftime("%H:%M") if en else "",
+        "start_min": st.hour * 60 + st.minute if st else None,
+        "end_min": (en.hour * 60 + en.minute) if en else ((st.hour * 60 + st.minute + 30) if st else None),
+        "where": m.get("location") or ("Google Meet" if m.get("hangout_link") else ""),
+        "link": m.get("hangout_link") or m.get("html_link") or "",
+        "people": [a for a in (m.get("attendees") or [])][:6],
+    }
+
+
+def day_label(d: date, ref: date) -> str:
+    if d == ref:
+        return "Dziś"
+    if d == ref + timedelta(days=1):
+        return "Jutro"
+    return f"{_WD[d.weekday()]} {d.strftime('%d.%m')}"
+
+
+async def calendar_days(db, first: date, n: int, ref: date | None = None) -> list[dict]:
+    """Events of n days from `first`, one entry per day (empty days included)."""
+    ref = ref or first
+    rows = await db.get_calendar_events(day_range(first)[0], day_range(first + timedelta(days=n - 1))[1])
+    days: dict[date, list] = {first + timedelta(days=i): [] for i in range(n)}
+    for e in rows:
+        ev = _event(e)
+        if ev and ev["day"] in days:
+            days[ev["day"]].append(ev)
+    return [{"day": d, "label": day_label(d, ref), "weekend": d.weekday() >= 5,
+             "events": sorted(evs, key=lambda x: (not x["all_day"], x["start_min"] or 0))}
+            for d, evs in days.items()]
+
+
+def in_focus(r: dict, ref: date) -> bool:
+    """On today's plan: decisions, deadlines today / recently passed, and what came in since yesterday."""
+    overdue_recent = r.get("overdue") and r.get("due") and date.fromisoformat(r["due"]) >= ref - timedelta(days=FOCUS_OVERDUE_DAYS)
+    since = r.get("since")
+    fresh = isinstance(since, datetime) and to_local(since).date() >= ref - timedelta(days=1)
+    if r["kind"] == "czekam":
+        return bool(overdue_recent or r.get("due_today") or r.get("new_today"))
+    return bool(r["kind"] == "decyzja" or overdue_recent or r.get("due_today") or fresh)
+
+
+async def build_day(db, ref: date | None = None, os_snapshot=None, cal: str = "dzis") -> dict:
     from src.reports.health import data_health
 
     ref = ref or today()
     start, end = day_range(ref)
-    cal = await db.get_calendar_events(start, end)
-    events = []
-    for e in cal:
-        m = e.get("metadata") or {}
-        if m.get("my_status") == "declined":
-            continue
-        st = to_local(e["timestamp"])
-        end_ts = m.get("end")
-        try:
-            en = to_local(datetime.fromisoformat(end_ts)) if isinstance(end_ts, str) and "T" in end_ts else None
-        except ValueError:
-            en = None
-        events.append({
-            "title": e.get("title") or "(bez tytułu)",
-            "all_day": bool(m.get("all_day")),
-            "start": st.strftime("%H:%M") if st else "",
-            "end": en.strftime("%H:%M") if en else "",
-            "start_min": st.hour * 60 + st.minute if st else None,
-            "end_min": (en.hour * 60 + en.minute) if en else ((st.hour * 60 + st.minute + 30) if st else None),
-            "where": m.get("location") or ("Google Meet" if m.get("hangout_link") else ""),
-            "link": m.get("hangout_link") or m.get("html_link") or "",
-            "people": [a for a in (m.get("attendees") or [])][:6],
-        })
-    events.sort(key=lambda x: (not x["all_day"], x["start_min"] or 0))
+    cal = cal if cal in CAL_MODES else "dzis"
+    today_cal = await calendar_days(db, ref, 1)
+    events = today_cal[0]["events"]
+    if cal == "dzis":
+        cal_days = today_cal
+    elif cal == "jutro":
+        cal_days = await calendar_days(db, ref + timedelta(days=1), 1, ref)
+    else:
+        cal_days = await calendar_days(db, ref, 7)
 
     open_items = await db.list_commitments(status="open", limit=200, include_snoozed=False)
-    rows = [item_row(c, ref) for c in open_items]
-    # "czekasz na" only when it is due / overdue / new today — the rest is noise on a day plan
-    rows = [r for r in rows if r["kind"] != "czekam" or r["overdue"] or r["due_today"] or r["new_today"]]
+    all_rows = [item_row(c, ref) for c in open_items]
+    rows = [r for r in all_rows if in_focus(r, ref)]
+    rest = sorted([r for r in all_rows if not in_focus(r, ref)], key=sort_key)
 
     wa = await db.get_whatsapp_awaiting(days=5, limit=40, hide_answered=False)
     mail = await db.get_email_awaiting(days=4, limit=40, hide_answered=False)
@@ -193,7 +240,9 @@ async def build_day(db, ref: date | None = None, os_snapshot=None) -> dict:
         "day": ref,
         "now": now(),
         "events": events,
+        "calendar": {"mode": cal, "days": cal_days, "modes": CAL_MODES},
         "plan": plan,
+        "rest": rest,
         "replies": replies,
         "answered_elsewhere": answered,
         "os": os_rows,
@@ -234,6 +283,8 @@ def day_text(d: dict) -> str:
     if d["os"]:
         out.append("\nZadania OS (zaległe i na dziś):")
         out += [f"  {t['title']}{' · PO TERMINIE' if t['overdue'] else ''} {t.get('link') or ''}" for t in d["os"]]
+    if d.get("rest"):
+        out.append(f"\nPozostałe otwarte sprawy (starsze, bez terminu na dziś): {len(d['rest'])} — list_items")
     if d["answered_elsewhere"]:
         out.append("\nOdpisałeś innym kanałem (sprawdź, czy temat zamknięty):")
         out += [f"  [{r['channel']}:{r['ref']}] {r['who']}: {r['title'][:100]}" for r in d["answered_elsewhere"]]
