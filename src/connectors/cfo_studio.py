@@ -105,11 +105,23 @@ class CFOStudioClient:
     def configured(self) -> bool:
         return bool(self.key)
 
+    async def list_tools(self) -> list[dict]:
+        """CFO Studio's tools for this key: [{name, title, description, inputSchema}] (tools/list)."""
+        data = await self._rpc("tools/list", {})
+        return [{k: t.get(k) for k in ("name", "title", "description", "inputSchema")} for t in data.get("tools", [])]
+
     async def call(self, tool: str, arguments: dict | None = None) -> str:
         """One CFO Studio MCP tool → its text result (JSON for data tools, markdown for cfo_guide)."""
+        result = await self._rpc("tools/call", {"name": tool, "arguments": arguments or {}})
+        text = "".join(c.get("text", "") for c in result.get("content", []) if c.get("type") == "text")
+        if result.get("isError"):
+            raise CFOStudioError(text or "CFO Studio: błąd narzędzia")
+        return text
+
+    async def _rpc(self, method: str, params: dict) -> dict:
         if not self.configured:
             raise CFOStudioError("Brak CFO_STUDIO_API_KEY w .env — klucz tworzysz w CFO Studio → MCP / czat → Klucze API.")
-        body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": arguments or {}}}
+        body = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
         headers = {"Authorization": f"Bearer {self.key}", "Accept": "application/json, text/event-stream"}
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -123,11 +135,7 @@ class CFOStudioClient:
         data = resp.json()
         if data.get("error"):
             raise CFOStudioError(f"CFO Studio: {data['error'].get('message', 'błąd MCP')}")
-        result = data.get("result") or {}
-        text = "".join(c.get("text", "") for c in result.get("content", []) if c.get("type") == "text")
-        if result.get("isError"):
-            raise CFOStudioError(text or "CFO Studio: błąd narzędzia")
-        return text
+        return data.get("result") or {}
 
     async def call_json(self, tool: str, arguments: dict | None = None) -> Any:
         return json.loads(await self.call(tool, arguments))
