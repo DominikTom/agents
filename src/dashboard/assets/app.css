@@ -354,6 +354,12 @@
   .chip {
     @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition;
   }
+  button.chip {
+    @apply border-line bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink;
+  }
+  .chip-active {
+    @apply border-primary/50 bg-primary-soft text-primary-ink;
+  }
 
   /* Gęsty panel administracyjny: niższe pozycje, promień „control" 8px,
      aktywna pozycja w primary-soft zamiast ciemnej pigułki */

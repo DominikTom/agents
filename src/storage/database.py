@@ -211,11 +211,6 @@ ALTER TABLE reports ADD COLUMN IF NOT EXISTS title TEXT;
 ALTER TABLE reports ADD COLUMN IF NOT EXISTS html TEXT;
 ALTER TABLE reports ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}';
 ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS details JSONB;
-ALTER TABLE commitments ADD COLUMN IF NOT EXISTS resolved_by TEXT;
-ALTER TABLE commitments ADD COLUMN IF NOT EXISTS resolution TEXT;
-ALTER TABLE commitments ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
-ALTER TABLE commitments ADD COLUMN IF NOT EXISTS checked_until TIMESTAMPTZ;
-ALTER TABLE commitments ADD COLUMN IF NOT EXISTS keep_open BOOLEAN DEFAULT FALSE;
 
 -- Key/value settings edited from the panel (report profiles, preferences)
 CREATE TABLE IF NOT EXISTS settings (
@@ -267,6 +262,58 @@ CREATE TABLE IF NOT EXISTS commitments (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_commitments_status ON commitments(status);
+-- (after CREATE TABLE, so a fresh install works)
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS resolved_by TEXT;
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS resolution TEXT;
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS checked_until TIMESTAMPTZ;
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS keep_open BOOLEAN DEFAULT FALSE;
+-- decyzja | zadanie | odpowiedz | czekam — what kind of action the item needs (live day view)
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS kind TEXT;
+-- "not today": hidden from the day view and reports until this date
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS snoozed_until DATE;
+-- last cross-source check (other chats, e-mail, notes) — re-checked only when new evidence arrives
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS xchecked_at TIMESTAMPTZ;
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS note TEXT;
+
+-- What Dominik told the agents himself (MCP chat / panel): facts and decisions that settle open items
+-- and that reports treat as authoritative ("umowa Eli podpisana", "Comfy: płacimy w 3 ratach")
+CREATE TABLE IF NOT EXISTS ceo_notes (
+    id SERIAL PRIMARY KEY,
+    text TEXT NOT NULL,
+    about TEXT,
+    source TEXT DEFAULT 'mcp',
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ceo_notes_created ON ceo_notes(created_at);
+
+-- "Handled / no reply needed" for a WhatsApp chat or an e-mail thread, up to its last message at the time;
+-- a newer incoming message makes it wait again
+CREATE TABLE IF NOT EXISTS handled_marks (
+    kind TEXT NOT NULL,
+    ref TEXT NOT NULL,
+    until_ts TIMESTAMPTZ NOT NULL,
+    note TEXT,
+    handled_by TEXT DEFAULT 'user',
+    handled_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (kind, ref)
+);
+
+-- AI read of one e-mail thread Dominik takes part in (like chat_digests for WhatsApp)
+CREATE TABLE IF NOT EXISTS email_threads (
+    thread_id TEXT PRIMARY KEY,
+    subject TEXT,
+    counterpart TEXT,
+    summary TEXT,
+    importance TEXT DEFAULT 'normal',
+    needs_reply BOOLEAN DEFAULT FALSE,
+    reply_hint TEXT,
+    message_count INTEGER DEFAULT 0,
+    last_message_at TIMESTAMPTZ,
+    last_event_id INTEGER,
+    processed_at TIMESTAMPTZ DEFAULT NOW()
+);
 
 -- Claude API usage (cost visibility)
 CREATE TABLE IF NOT EXISTS ai_calls (
@@ -794,6 +841,13 @@ class Database:
             json.dumps(metadata or {}),
         )
 
+    async def delete_metrics_except(self, metric_date: date, stores: set[str]) -> None:
+        """Drop a day's metric rows of stores no longer produced (renamed / split stores)."""
+        await self._execute(
+            "DELETE FROM business_metrics WHERE date = $1 AND NOT (store = ANY($2::text[]))",
+            metric_date, sorted(stores),
+        )
+
     # =========================================================================
     # WhatsApp Chat Config
     # =========================================================================
@@ -1109,11 +1163,26 @@ class Database:
     # Inbox: things waiting for my reply
     # =========================================================================
 
-    async def get_whatsapp_awaiting(self, days: int = 5, limit: int = 30) -> list[dict]:
-        """Chats where the other side wrote last (direct) or mentioned me (groups) and I haven't answered."""
+    async def get_whatsapp_awaiting(self, days: int = 5, limit: int = 30, hide_answered: bool = True) -> list[dict]:
+        """Chats where the other side wrote last (direct) or mentioned me (groups) and I haven't answered — minus
+        chats marked handled, and (hide_answered) chats whose person got a mail from Dominik after they wrote."""
+        rows = await self._whatsapp_awaiting_raw(days, limit + 20)
+        handled = await self.handled_map("whatsapp")
+        rows = [r for r in rows if not (handled.get(r["jid"]) and handled[r["jid"]] >= r["last_at"])]
+        if rows:
+            out = await self.outbound_since(min(r["waiting_since"] for r in rows))
+            for r in rows:
+                ids = [i for i in (r.get("entity_ids") or []) if i]
+                later = [out["entities"][i] for i in ids if i in out["entities"] and out["entities"][i] > r["waiting_since"]]
+                r["answered_elsewhere"] = max(later) if later else None
+        if hide_answered:
+            rows = [r for r in rows if not r.get("answered_elsewhere")]
+        return rows[:limit]
+
+    async def _whatsapp_awaiting_raw(self, days: int, limit: int) -> list[dict]:
         return await self._fetchall(
             "WITH recent AS ("
-            "  SELECT e.id, e.timestamp, e.body, e.category, e.metadata, "
+            "  SELECT e.id, e.timestamp, e.body, e.category, e.metadata, e.sender_entity_id, "
             "  e.metadata->>'chat_jid' AS jid, COALESCE((e.metadata->>'from_me')::boolean, false) AS from_me, "
             "  COALESCE((e.metadata->>'mentions_me')::boolean, false) AS mentions_me "
             "  FROM events e WHERE e.source = 'whatsapp' AND e.timestamp > NOW() - make_interval(days => $1)"
@@ -1127,18 +1196,37 @@ class Database:
             "SELECT p.jid, MAX(p.metadata->>'chat_name') AS chat_name, BOOL_OR(p.category = 'group') AS is_group, "
             "COUNT(*) AS pending_count, MIN(p.timestamp) AS waiting_since, MAX(p.timestamp) AS last_at, "
             "(ARRAY_AGG(p.body ORDER BY p.timestamp DESC))[1] AS last_body, "
-            "(ARRAY_AGG(p.metadata->>'sender_name' ORDER BY p.timestamp DESC))[1] AS last_sender "
+            "(ARRAY_AGG(p.metadata->>'sender_name' ORDER BY p.timestamp DESC))[1] AS last_sender, "
+            "ARRAY_AGG(DISTINCT p.sender_entity_id) AS entity_ids "
             "FROM pending p LEFT JOIN whatsapp_chat_config c ON c.jid = p.jid "
             "WHERE c.enabled IS DISTINCT FROM FALSE "
             "GROUP BY p.jid ORDER BY MIN(p.timestamp) ASC LIMIT $2",
             days, limit,
         )
 
-    async def get_email_awaiting(self, days: int = 3, limit: int = 30) -> list[dict]:
-        """Incoming inbox e-mails (not promotions/newsletters) with no later reply of mine in the thread."""
+    async def get_email_awaiting(self, days: int = 3, limit: int = 30, hide_answered: bool = True) -> list[dict]:
+        """Incoming inbox e-mails (not promotions/newsletters) with no later reply of mine in the thread — minus
+        threads marked handled, and (hide_answered) mails whose sender heard from Dominik later on another channel
+        (WhatsApp, or a mail in another thread)."""
+        rows = await self._email_awaiting_raw(days)
+        handled = await self.handled_map("gmail")
+        rows = [r for r in rows
+                if not (handled.get(r["metadata"].get("thread_id")) and handled[r["metadata"]["thread_id"]] >= r["timestamp"])]
+        if rows:
+            out = await self.outbound_since(min(r["timestamp"] for r in rows))
+            for r in rows:
+                email = (r["metadata"].get("sender_email") or "").lower()
+                later = [t for t in (out["emails"].get(email), out["entities"].get(r.get("sender_entity_id")))
+                         if t and t > r["timestamp"]]
+                r["answered_elsewhere"] = max(later) if later else None
+        if hide_answered:
+            rows = [r for r in rows if not r.get("answered_elsewhere")]
+        return rows[:limit]
+
+    async def _email_awaiting_raw(self, days: int) -> list[dict]:
         rows = await self._fetchall(
             "SELECT DISTINCT ON (e.metadata->>'thread_id') e.id, e.timestamp, e.title, e.body, e.metadata, "
-            "e.priority, ent.display_name AS sender_display "
+            "e.priority, e.sender_entity_id, ent.display_name AS sender_display "
             "FROM events e LEFT JOIN entities ent ON ent.id = e.sender_entity_id "
             "WHERE e.source = 'gmail' AND e.timestamp > NOW() - make_interval(days => $1) "
             "AND NOT COALESCE((e.metadata->>'from_me')::boolean, false) "
@@ -1154,7 +1242,7 @@ class Database:
         for r in rows:
             r["metadata"] = _j(r.get("metadata"), {})
         rows.sort(key=lambda r: (r.get("priority") != "high", r["timestamp"]))
-        return rows[:limit]
+        return rows
 
     # =========================================================================
     # Chat digests
@@ -1204,36 +1292,244 @@ class Database:
     async def upsert_commitment(self, c: dict) -> int | None:
         row = await self._fetchone(
             "INSERT INTO commitments (fingerprint, direction, title, context, counterpart, source, chat_jid, "
-            "chat_name, source_at, due_date, due_hint) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) "
+            "chat_name, source_at, due_date, due_hint, kind, note) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) "
             "ON CONFLICT (fingerprint) DO UPDATE SET context = EXCLUDED.context, "
-            "due_date = COALESCE(EXCLUDED.due_date, commitments.due_date), updated_at = NOW() "
+            "due_date = COALESCE(EXCLUDED.due_date, commitments.due_date), "
+            "kind = COALESCE(commitments.kind, EXCLUDED.kind), updated_at = NOW() "
             "RETURNING id",
             c["fingerprint"], c["direction"], c["title"], c.get("context"), c.get("counterpart"),
             c["source"], c.get("chat_jid"), c.get("chat_name"), c.get("source_at"),
-            c.get("due_date"), c.get("due_hint"),
+            c.get("due_date"), c.get("due_hint"), c.get("kind") or default_kind(c["direction"]), c.get("note"),
         )
         return row["id"] if row else None
 
+    async def update_commitment(self, cid: int, fields: dict) -> dict | None:
+        """Edit from the panel / MCP (title, due date, kind, counterpart, note, snooze). Unknown keys are ignored."""
+        allowed = ("title", "due_date", "due_hint", "kind", "counterpart", "note", "snoozed_until", "direction")
+        sets, args = [], [cid]
+        for k in allowed:
+            if k in fields:
+                args.append(fields[k])
+                sets.append(f"{k} = ${len(args)}")
+        if not sets:
+            return await self.get_commitment(cid)
+        return await self._fetchone(
+            f"UPDATE commitments SET {', '.join(sets)}, updated_at = NOW() WHERE id = $1 RETURNING *", *args
+        )
+
+    async def search_commitments(self, query: str, status: str | None = "open", limit: int = 10) -> list[dict]:
+        """Open items matching words of `query` (title, counterpart, chat name, quote) — best matches first."""
+        words = [w for w in _words(query) if len(w) >= 3][:8]
+        if not words:
+            return []
+        patterns = [f"%{w[:6]}%" for w in words]
+        return await self._fetchall(
+            "SELECT c.*, (SELECT COUNT(*) FROM unnest($1::text[]) p "
+            "  WHERE lower(c.title || ' ' || COALESCE(c.counterpart, '') || ' ' || COALESCE(c.chat_name, '') || ' ' "
+            "  || COALESCE(c.context, '')) LIKE p) AS hits "
+            "FROM commitments c WHERE ($2::text IS NULL OR c.status = $2) "
+            "AND lower(c.title || ' ' || COALESCE(c.counterpart, '') || ' ' || COALESCE(c.chat_name, '') || ' ' "
+            "|| COALESCE(c.context, '')) LIKE ANY($1::text[]) "
+            "ORDER BY hits DESC, c.source_at DESC NULLS LAST LIMIT $3",
+            patterns, status, limit,
+        )
+
+    async def resolved_since(self, since: datetime, limit: int = 40) -> list[dict]:
+        """Items closed (automatically or by Dominik) since `since` — reports must not show them as open."""
+        return await self._fetchall(
+            "SELECT * FROM commitments WHERE status IN ('done', 'dismissed') AND resolved_at >= $1 "
+            "ORDER BY resolved_at DESC LIMIT $2", since, limit,
+        )
+
+    async def get_crosscheck_candidates(self, limit: int = 120) -> list[dict]:
+        """Open items for the cross-source check (all sources), newest first."""
+        return await self._fetchall(
+            "SELECT * FROM commitments WHERE status = 'open' AND NOT COALESCE(keep_open, FALSE) "
+            "ORDER BY COALESCE(source_at, created_at) DESC LIMIT $1", limit,
+        )
+
+    async def mark_crosschecked(self, ids: list[int]) -> None:
+        await self._execute("UPDATE commitments SET xchecked_at = NOW() WHERE id = ANY($1::int[])", ids)
+
+    async def find_evidence(self, since: datetime, terms: list[str], entity_id: int | None = None,
+                            emails: list[str] | None = None, limit: int = 10) -> list[dict]:
+        """Messages after `since` that may settle an item, from ALL chats and e-mail: Dominik's own messages first.
+        Matches by the item's keywords (prefix search, so Polish word endings still match) and, when the other
+        person is known, everything exchanged with them (their messages, Dominik's direct chat with them, mails
+        to their address)."""
+        tsq = " | ".join(f"{t}:*" for t in terms) if terms else None
+        return await self._fetchall(
+            "WITH person_chats AS ("
+            "  SELECT DISTINCT metadata->>'chat_jid' AS jid FROM events "
+            "  WHERE source = 'whatsapp' AND category = 'direct' AND $3::int IS NOT NULL AND sender_entity_id = $3"
+            ") "
+            "SELECT e.id, e.source, e.timestamp, e.ingested_at, e.title, e.body, e.metadata, e.sender_entity_id, "
+            "ent.display_name AS sender_display, "
+            "COALESCE((e.metadata->>'from_me')::boolean, false) AS from_me, "
+            "CASE WHEN $2::text IS NULL THEN 0 ELSE ts_rank(e.search_vector, to_tsquery('simple', $2)) END AS rank "
+            "FROM events e LEFT JOIN entities ent ON ent.id = e.sender_entity_id "
+            "WHERE e.source IN ('whatsapp', 'gmail') AND e.timestamp > $1 "
+            "AND NOT COALESCE((e.metadata->>'bulk')::boolean, false) AND ("
+            "  ($2::text IS NOT NULL AND e.search_vector @@ to_tsquery('simple', $2)) "
+            "  OR ($3::int IS NOT NULL AND e.sender_entity_id = $3) "
+            "  OR (e.source = 'whatsapp' AND e.metadata->>'chat_jid' IN (SELECT jid FROM person_chats)) "
+            "  OR (e.source = 'gmail' AND COALESCE((e.metadata->>'from_me')::boolean, false) AND $4::text[] IS NOT NULL "
+            "      AND lower(COALESCE(e.metadata->>'to', '') || ' ' || COALESCE(e.metadata->>'cc', '')) LIKE ANY($4::text[]))"
+            ") "
+            "ORDER BY from_me DESC, rank DESC, e.timestamp DESC LIMIT $5",
+            since, tsq, entity_id, [f"%{m.lower()}%" for m in emails] if emails else None, limit,
+        )
+
+    async def max_evidence_ingest(self, since: datetime) -> datetime | None:
+        row = await self._fetchone(
+            "SELECT MAX(ingested_at) AS t FROM events WHERE source IN ('whatsapp', 'gmail') AND ingested_at > $1", since)
+        return row["t"] if row else None
+
+    async def entity_emails(self, entity_id: int) -> list[str]:
+        rows = await self._fetchall(
+            "SELECT alias_name FROM entity_aliases WHERE entity_id = $1 AND source = 'gmail' AND alias_name LIKE '%@%'",
+            entity_id,
+        )
+        return [r["alias_name"] for r in rows]
+
+    # =========================================================================
+    # Dominik's own notes and "handled" marks
+    # =========================================================================
+
+    async def add_note(self, text: str, about: str | None = None, source: str = "mcp") -> dict:
+        return await self._fetchone(
+            "INSERT INTO ceo_notes (text, about, source) VALUES ($1, $2, $3) RETURNING *", text, about, source)
+
+    async def list_notes(self, since: datetime | None = None, limit: int = 50, active_only: bool = True) -> list[dict]:
+        return await self._fetchall(
+            "SELECT * FROM ceo_notes WHERE ($1::timestamptz IS NULL OR created_at >= $1) "
+            "AND (NOT $2 OR active) ORDER BY created_at DESC LIMIT $3", since, active_only, limit,
+        )
+
+    async def deactivate_note(self, note_id: int) -> bool:
+        row = await self._fetchone("UPDATE ceo_notes SET active = FALSE WHERE id = $1 RETURNING id", note_id)
+        return bool(row)
+
+    async def mark_handled(self, kind: str, ref: str, until_ts: datetime, note: str | None = None,
+                           by: str = "user") -> None:
+        await self._execute(
+            "INSERT INTO handled_marks (kind, ref, until_ts, note, handled_by) VALUES ($1, $2, $3, $4, $5) "
+            "ON CONFLICT (kind, ref) DO UPDATE SET until_ts = GREATEST(handled_marks.until_ts, EXCLUDED.until_ts), "
+            "note = COALESCE(EXCLUDED.note, handled_marks.note), handled_by = EXCLUDED.handled_by, handled_at = NOW()",
+            kind, ref, until_ts, note, by,
+        )
+
+    async def handled_map(self, kind: str) -> dict[str, datetime]:
+        rows = await self._fetchall("SELECT ref, until_ts FROM handled_marks WHERE kind = $1", kind)
+        return {r["ref"]: r["until_ts"] for r in rows}
+
+    async def last_message_at(self, kind: str, ref: str) -> datetime | None:
+        if kind == "whatsapp":
+            row = await self._fetchone(
+                "SELECT MAX(timestamp) AS t FROM events WHERE source = 'whatsapp' AND metadata->>'chat_jid' = $1", ref)
+        else:
+            row = await self._fetchone(
+                "SELECT MAX(timestamp) AS t FROM events WHERE source = 'gmail' AND metadata->>'thread_id' = $1", ref)
+        return row["t"] if row else None
+
+    async def outbound_since(self, since: datetime) -> dict:
+        """Who Dominik wrote to since `since`, on any channel: {"entities": {id: last_ts}, "emails": {addr: last_ts}}.
+        WhatsApp: direct chats with a message of his (the chat's person = whoever writes in it);
+        e-mail: To/Cc of his sent mails (mapped to people through their e-mail aliases)."""
+        wa = await self._fetchall(
+            "WITH mine AS (SELECT metadata->>'chat_jid' AS jid, MAX(timestamp) AS ts FROM events "
+            "  WHERE source = 'whatsapp' AND category = 'direct' AND timestamp > $1 "
+            "  AND COALESCE((metadata->>'from_me')::boolean, false) GROUP BY 1) "
+            "SELECT DISTINCT m.ts, e.sender_entity_id AS entity_id FROM mine m JOIN events e "
+            "ON e.source = 'whatsapp' AND e.metadata->>'chat_jid' = m.jid AND e.sender_entity_id IS NOT NULL",
+            since,
+        )
+        mails = await self._fetchall(
+            "SELECT timestamp, COALESCE(metadata->>'to', '') || ',' || COALESCE(metadata->>'cc', '') AS rcpt "
+            "FROM events WHERE source = 'gmail' AND timestamp > $1 AND COALESCE((metadata->>'from_me')::boolean, false)",
+            since,
+        )
+        aliases = await self._fetchall(
+            "SELECT lower(alias_name) AS email, entity_id FROM entity_aliases WHERE source = 'gmail' AND alias_name LIKE '%@%'"
+        )
+        return merge_outbound(wa, mails, {a["email"]: a["entity_id"] for a in aliases})
+
+    # =========================================================================
+    # E-mail threads (AI read per thread)
+    # =========================================================================
+
+    async def get_email_threads_to_read(self, since: datetime, limit: int = 40) -> list[dict]:
+        """Threads with new messages since `since` that Dominik takes part in (received in the inbox or sent by
+        him), without newsletters/promotions — and not read by the AI since their last message."""
+        return await self._fetchall(
+            "SELECT e.metadata->>'thread_id' AS thread_id, MAX(e.id) AS last_event_id, MAX(e.timestamp) AS last_at, "
+            "(ARRAY_AGG(e.title ORDER BY e.timestamp DESC))[1] AS subject "
+            "FROM events e LEFT JOIN email_threads t ON t.thread_id = e.metadata->>'thread_id' "
+            "WHERE e.source = 'gmail' AND e.timestamp > $1 AND e.metadata->>'thread_id' IS NOT NULL "
+            "AND NOT COALESCE((e.metadata->>'bulk')::boolean, false) "
+            "AND (COALESCE((e.metadata->>'from_me')::boolean, false) OR e.metadata->'labels' ? 'INBOX') "
+            "AND NOT (e.metadata->'labels' ?| ARRAY['CATEGORY_PROMOTIONS','CATEGORY_SOCIAL','CATEGORY_UPDATES',"
+            "'CATEGORY_FORUMS','SPAM','TRASH']) "
+            "GROUP BY 1, t.last_event_id HAVING MAX(e.id) > COALESCE(t.last_event_id, 0) "
+            "ORDER BY MAX(e.timestamp) DESC LIMIT $2",
+            since, limit,
+        )
+
+    async def get_thread_messages(self, thread_id: str, limit: int = 15) -> list[dict]:
+        rows = await self._fetchall(
+            "SELECT * FROM (SELECT e.id, e.timestamp, e.title, e.body, e.metadata, e.sender_entity_id, "
+            "ent.display_name AS sender_display FROM events e LEFT JOIN entities ent ON ent.id = e.sender_entity_id "
+            "WHERE e.source = 'gmail' AND e.metadata->>'thread_id' = $1 ORDER BY e.timestamp DESC LIMIT $2"
+            ") t ORDER BY timestamp ASC",
+            thread_id, limit,
+        )
+        for r in rows:
+            r["metadata"] = _j(r.get("metadata"), {})
+        return rows
+
+    async def upsert_email_thread(self, t: dict) -> None:
+        await self._execute(
+            "INSERT INTO email_threads (thread_id, subject, counterpart, summary, importance, needs_reply, reply_hint, "
+            "message_count, last_message_at, last_event_id, processed_at) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW()) ON CONFLICT (thread_id) DO UPDATE SET "
+            "subject = EXCLUDED.subject, counterpart = EXCLUDED.counterpart, summary = EXCLUDED.summary, "
+            "importance = EXCLUDED.importance, needs_reply = EXCLUDED.needs_reply, reply_hint = EXCLUDED.reply_hint, "
+            "message_count = EXCLUDED.message_count, last_message_at = EXCLUDED.last_message_at, "
+            "last_event_id = EXCLUDED.last_event_id, processed_at = NOW()",
+            t["thread_id"], t.get("subject"), t.get("counterpart"), t.get("summary"), t.get("importance", "normal"),
+            bool(t.get("needs_reply")), t.get("reply_hint"), t.get("message_count", 0), t.get("last_message_at"),
+            t.get("last_event_id"),
+        )
+
+    async def get_email_thread_hints(self, thread_ids: list[str]) -> dict[str, dict]:
+        if not thread_ids:
+            return {}
+        rows = await self._fetchall("SELECT * FROM email_threads WHERE thread_id = ANY($1::text[])", thread_ids)
+        return {r["thread_id"]: r for r in rows}
+
     async def list_commitments(
         self, status: str | None = "open", direction: str | None = None, limit: int = 100,
+        include_snoozed: bool = True,
     ) -> list[dict]:
         return await self._fetchall(
             "SELECT * FROM commitments WHERE ($1::text IS NULL OR status = $1) "
             "AND ($2::text IS NULL OR direction = $2) "
+            "AND ($4 OR snoozed_until IS NULL OR snoozed_until <= CURRENT_DATE) "
             "ORDER BY CASE WHEN $1 = 'open' THEN NULL ELSE COALESCE(resolved_at, updated_at) END DESC NULLS LAST, "
             "(due_date IS NULL), due_date, source_at DESC NULLS LAST LIMIT $3",
-            status, direction, limit,
+            status, direction, limit, include_snoozed,
         )
 
     async def get_commitment(self, cid: int) -> dict | None:
         return await self._fetchone("SELECT * FROM commitments WHERE id = $1", cid)
 
-    async def set_commitment_status(self, cid: int, status: str) -> None:
-        """A decision made in the panel. Restoring an item keeps it open for good (no automatic closing)."""
+    async def set_commitment_status(self, cid: int, status: str, note: str | None = None) -> None:
+        """A decision made in the panel / MCP. Restoring an item keeps it open for good (no automatic closing)."""
         await self._execute(
             "UPDATE commitments SET status = $2, updated_at = NOW(), resolved_by = 'user', "
-            "resolution = NULL, resolved_at = CASE WHEN $2 = 'open' THEN NULL ELSE NOW() END, "
-            "keep_open = ($2 = 'open') WHERE id = $1", cid, status
+            "resolution = $3, resolved_at = CASE WHEN $2 = 'open' THEN NULL ELSE NOW() END, "
+            "keep_open = ($2 = 'open') WHERE id = $1", cid, status, note
         )
 
     async def get_open_commitments_for_chat(self, jid: str, limit: int = 40) -> list[dict]:
@@ -1572,3 +1868,34 @@ def _j(value, default=None):
         return json.loads(value)
     except (TypeError, ValueError):
         return default
+
+
+def default_kind(direction: str) -> str:
+    return "czekam" if direction == "theirs" else "zadanie"
+
+
+def _words(text: str) -> list[str]:
+    import re
+
+    return re.findall(r"[0-9a-ząćęłńóśźż]+", (text or "").lower())
+
+
+def merge_outbound(wa_rows: list[dict], mail_rows: list[dict], alias_entity: dict[str, int]) -> dict:
+    """Last outbound contact per person (entity) and per e-mail address."""
+    import re
+
+    entities: dict[int, datetime] = {}
+    emails: dict[str, datetime] = {}
+    for r in wa_rows:
+        eid, ts = r["entity_id"], r["ts"]
+        if eid and (eid not in entities or ts > entities[eid]):
+            entities[eid] = ts
+    for r in mail_rows:
+        ts = r["timestamp"]
+        for addr in re.findall(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", (r.get("rcpt") or "").lower()):
+            if addr not in emails or ts > emails[addr]:
+                emails[addr] = ts
+            eid = alias_entity.get(addr)
+            if eid and (eid not in entities or ts > entities[eid]):
+                entities[eid] = ts
+    return {"entities": entities, "emails": emails}

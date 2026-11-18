@@ -127,8 +127,18 @@ def _asset_version() -> str:
 templates.env.globals["asset_v"] = _asset_version()
 templates.env.globals.update({"now": now, "today": today})
 
+
+def _item_link(c: dict):
+    from src.processing.day_view import item_link
+
+    return item_link(c)
+
+
+templates.env.globals["item_link"] = _item_link
+
 NAV = [
     ("Start", [
+        ("/dzis", "Dziś", "list-checks", "today"),
         ("/", "Pulpit", "layout-dashboard", "pulpit"),
         ("/reports", "Raporty", "file-text", "reports"),
         ("/studio", "Studio raportów", "sliders-horizontal", "studio"),
@@ -218,6 +228,66 @@ async def pulpit_page(request: Request):
     ctx = await data.pulpit(get_db_sync())
     series = (ctx["dash"] or {}).get("series", [])
     return render(request, "pulpit.html", "pulpit", **ctx, series_json=json.dumps(series))
+
+
+# ─── Today (live day view) ───────────────────────────────────────────────────
+
+
+@app.get("/dzis", response_class=HTMLResponse)
+async def today_page(request: Request, partial: int = 0):
+    if not authed(request):
+        return unauthorized() if partial else login_redirect(request)
+    from src.processing.day_view import build_day
+
+    db = get_db_sync()
+    d = await build_day(db, os_snapshot=await data.os_snapshot())
+    if partial:
+        return templates.TemplateResponse(request, "_today_body.html", {"d": d})
+    return render(request, "today.html", "today", d=d)
+
+
+@app.post("/api/commitments/{cid}/snooze")
+async def commitment_snooze(request: Request, cid: int, until: str = Form("")):
+    """Not today: hidden from the day view and reports until the next working day (or the given date)."""
+    if not authed(request):
+        return unauthorized()
+    from src.common.timeutil import next_workday
+
+    try:
+        day = date.fromisoformat(until) if until else next_workday(today())
+    except ValueError:
+        return JSONResponse({"error": "zła data"}, status_code=400)
+    row = await get_db_sync().update_commitment(cid, {"snoozed_until": day})
+    if not row:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return {"status": "snoozed", "until": day.strftime("%d.%m")}
+
+
+@app.post("/api/handled")
+async def mark_handled_route(request: Request, kind: str = Form(...), ref: str = Form(...), note: str = Form("")):
+    """A WhatsApp chat / e-mail thread needs no reply (answered elsewhere, by phone, or nothing to answer)."""
+    if not authed(request):
+        return unauthorized()
+    if kind not in ("whatsapp", "gmail") or not ref:
+        return JSONResponse({"error": "bad kind"}, status_code=400)
+    db = get_db_sync()
+    last = await db.last_message_at(kind, ref) or now()
+    await db.mark_handled(kind, ref, last, note.strip()[:300] or None)
+    return {"status": "handled"}
+
+
+@app.post("/api/items")
+async def add_item_route(request: Request, title: str = Form(...), kind: str = Form("zadanie"), due: str = Form(""),
+                         who: str = Form("")):
+    if not authed(request):
+        return unauthorized()
+    from src.processing.items import add_manual_item
+
+    try:
+        item = await add_manual_item(get_db_sync(), title, kind=kind, due=due or None, who=who or None)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return {"status": "added", "id": item["id"]}
 
 
 # ─── Reports ─────────────────────────────────────────────────────────────────
@@ -597,7 +667,7 @@ async def sources_page(request: Request):
     os_snap = await data.os_snapshot()
     return render(request, "sources.html", "sources", health=health, bridge=bridge, config=data.config_status(),
                   runs=runs, os_counts=os_snap.summary_counts() if os_snap else None,
-                  dash=await data.dash_overview())
+                  dash=await data.dash_overview(db))
 
 
 @app.get("/sources/whatsapp", response_class=HTMLResponse)

@@ -98,7 +98,10 @@ async def dash_check(day: str | None) -> None:
     from src.connectors.dash import DashClient
 
     d = _date.fromisoformat(day) if day else today() - _td(days=1)
-    c = DashClient()
+    from src.jobs import database
+
+    async with database() as db:
+        c = await DashClient.from_settings(db)
     print(f"URL: {c.rest.url} · klucz: {'jest' if c.rest.key else 'BRAK'} ({len(c.rest.key)} znaków)")
     for name, fn in (("Meta (fact_daily_adspend)", c.adspend), ("GA4 (fact_daily_traffic)", c.google_cost),
                      ("sprzedaż (fact_daily_revenue)", c.revenue)):

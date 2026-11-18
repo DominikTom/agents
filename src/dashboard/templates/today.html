@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+{% block title %}Dziś{% endblock %}
+
+{% block content %}
+<div class="mb-5 flex flex-wrap items-end justify-between gap-3">
+  <div>
+    <h2 class="page-title">Dziś</h2>
+    <p class="page-subtitle">{{ d.day|datepl|capitalize }} · co masz w planie: spotkania, decyzje, odpowiedzi i zadania z maili, WhatsAppa i MyBed OS.
+      <span class="ml-1 inline-flex items-center gap-1 text-xs text-ink-faint"><span class="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span> na żywo · <span id="stamp">{{ d.now|hm }}</span></span></p>
+  </div>
+  <div class="flex flex-wrap gap-2">
+    <button class="btn-secondary" data-run="/api/jobs/live_refresh/run" data-busy="Czytam…" data-reload="45000"
+            data-msg="Czytam nowe maile i sprawdzam, co już załatwiłeś (ok. pół minuty).">{{ icon("refresh-cw") }} Sprawdź teraz</button>
+  </div>
+</div>
+
+<form id="quick-add" class="card mb-4 flex flex-wrap items-center gap-2 p-2.5" onsubmit="addItem(event)">
+  <span class="pl-1 text-ink-faint">{{ icon("plus") }}</span>
+  <input name="title" class="input min-w-[220px] flex-1 !border-0 !shadow-none" placeholder="Dodaj sprawę na dziś, np. „Zadzwoń do Comfy w sprawie płatności”" maxlength="300" required>
+  <select name="kind" class="input !w-auto text-sm">
+    <option value="zadanie">Do zrobienia</option>
+    <option value="decyzja">Decyzja</option>
+    <option value="odpowiedz">Odpowiedz</option>
+    <option value="czekam">Czekam na</option>
+  </select>
+  <input name="due" type="date" class="input !w-auto text-sm" value="{{ d.day.isoformat() }}">
+  <button class="btn-primary">Dodaj</button>
+</form>
+
+<div id="day-root">{% include "_today_body.html" %}</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let filterKind = ''
+function applyFilter() {
+  document.querySelectorAll('[data-kind-row]').forEach((el) => {
+    el.classList.toggle('hidden', !!filterKind && el.dataset.kindRow !== filterKind)
+  })
+  document.querySelectorAll('[data-filter]').forEach((b) => b.classList.toggle('chip-active', b.dataset.filter === filterKind))
+}
+function setFilter(k) { filterKind = filterKind === k ? '' : k; applyFilter() }
+
+async function refreshDay() {
+  if (document.hidden || document.querySelector('#day-root button[disabled]')) return
+  try {
+    const res = await fetch('/dzis?partial=1', { headers: { 'X-Partial': '1' } })
+    if (res.status === 401) return
+    if (!res.ok) return
+    document.getElementById('day-root').innerHTML = await res.text()
+    const now = new Date()
+    document.getElementById('stamp').textContent = now.toTimeString().slice(0, 5)
+    applyFilter()
+    placeNowLine()
+  } catch (e) {}
+}
+setInterval(refreshDay, 60000)
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshDay() })
+
+function placeNowLine() {
+  const line = document.getElementById('now-line')
+  if (!line) return
+  const start = Number(line.dataset.start), end = Number(line.dataset.end)
+  const n = new Date(), m = n.getHours() * 60 + n.getMinutes()
+  if (m < start || m > end) { line.classList.add('hidden'); return }
+  line.classList.remove('hidden')
+  line.style.top = ((m - start) / (end - start) * 100) + '%'
+}
+placeNowLine()
+setInterval(placeNowLine, 60000)
+
+async function itemStatus(id, status, btn) {
+  const fd = new FormData(); fd.append('status', status)
+  busy(btn, true, '')
+  try { await post(`/api/commitments/${id}/status`, fd); document.getElementById('it-' + id)?.remove(); toast(status === 'done' ? 'Zrobione' : 'Usunięte z listy', 'success') }
+  catch (e) { toast(e.message, 'error'); busy(btn, false) }
+}
+async function snooze(id, btn) {
+  busy(btn, true, '')
+  try { const r = await post(`/api/commitments/${id}/snooze`, new FormData()); document.getElementById('it-' + id)?.remove(); toast('Przeniesione na ' + r.until, 'success') }
+  catch (e) { toast(e.message, 'error'); busy(btn, false) }
+}
+async function handled(kind, ref, rowId, btn) {
+  const fd = new FormData(); fd.append('kind', kind); fd.append('ref', ref)
+  busy(btn, true, '')
+  try { await post('/api/handled', fd); document.getElementById(rowId)?.remove(); toast('Oznaczone jako obsłużone', 'success') }
+  catch (e) { toast(e.message, 'error'); busy(btn, false) }
+}
+async function addItem(ev) {
+  ev.preventDefault()
+  const form = ev.target, btn = form.querySelector('button')
+  busy(btn, true, 'Dodaję…')
+  try { await post('/api/items', new FormData(form)); form.reset(); form.querySelector('[name=due]').value = '{{ d.day.isoformat() }}'; toast('Dodano', 'success'); await refreshDay() }
+  catch (e) { toast(e.message, 'error') }
+  finally { busy(btn, false) }
+}
+</script>
+{% endblock %}

@@ -17,8 +17,9 @@ SOURCES: dict[str, dict] = {
                "Głosówki i pliki są oznaczane (bez transkrypcji).",
         "cadence": "co 5 min",
         "processing": "Raz na godzinę (8–20) AI streszcza każdy aktywny czat z danego dnia: streszczenie, ustalenia, "
-                      "otwarte kwestie, czy ktoś czeka na Twoją odpowiedź, zobowiązania. Potem AI czyta dalszy ciąg "
-                      "rozmów z otwartymi zobowiązaniami i zamyka załatwione, nieaktualne i zdublowane.",
+                      "otwarte kwestie, czy ktoś czeka na Twoją odpowiedź, sprawy (decyzja / do zrobienia / odpowiedź / "
+                      "czekasz na). Co 15 min AI szuka dowodów załatwienia w dalszym ciągu rozmowy, w INNYCH czatach, "
+                      "w mailach i w Twoich notatkach z czatu z Claude — i zamyka załatwione, nieaktualne i zdublowane.",
         "job": "whatsapp_sync",
         "health": "whatsapp",
     },
@@ -28,7 +29,10 @@ SOURCES: dict[str, dict] = {
         "what": "Skrzynka dominik.tomaszczyk@mybed.pl: nadawca, temat, treść. Newslettery i automaty oznaczane jako masowe.",
         "how": "Google API (konto serwisowe z delegacją), wątki z ostatnich godzin; po przerwie dociąga do 3 dni wstecz.",
         "cadence": "co 10 min",
-        "processing": "Maile, na które nie odpowiedziałeś, trafiają do „Czeka na Twoją odpowiedź”; ważne maile — do sekcji Poczta.",
+        "processing": "Co 15 min (7–20) AI czyta każdy nowy wątek, w którym jesteś adresatem albo nadawcą: streszczenie, "
+                      "czy ktoś czeka na Ciebie i sprawy (decyzje, zadania, odpowiedzi) — trafiają do planu dnia i "
+                      "zobowiązań. Mail, na który odpowiedziałeś w wątku, innym mailem albo na WhatsAppie, nie wisi w "
+                      "„Czeka na Twoją odpowiedź”.",
         "job": "gmail_sync",
         "health": "gmail",
     },
@@ -59,19 +63,22 @@ SOURCES: dict[str, dict] = {
     "dash": {
         "label": "Hurtownia dash",
         "icon": "shopping-cart",
-        "what": "Sprzedaż per sklep (fact_daily_revenue), wydatki Meta per konto reklamowe (fact_daily_adspend), "
-                "showroomy (sensmax_showroom_sales).",
+        "what": "Sprzedaż per sklep (fact_daily_revenue: mybed.pl, mybed.de, mojepostel.cz — w dash „shoper_unknown”, "
+                "mittohome.pl, nomosleep.pl), wydatki Meta per konto reklamowe (fact_daily_adspend; konto → sklep, "
+                "konto bez przypisania pokazujemy osobno), showroomy (sensmax_showroom_sales).",
         "how": "Supabase dash, odczyt przy raporcie. ETL po stronie dasha odświeża wczorajszy dzień ok. 6:00 — "
                "dlatego wszystkie okresy kończą się na wczoraj.",
         "cadence": "raz dziennie (ok. 6:00)",
-        "processing": "Tabela „Liczby” i sekcje Sprzedaż / Marketing / Showroomy. Liczby liczy kod, nie AI.",
+        "processing": "Tabela „Liczby” i sekcje Sprzedaż / Marketing / Showroomy. Liczby liczy kod, nie AI. Marka = sklep "
+                      "(MyBed: mybed.pl, mybed.de, mojepostel.cz; MittoHome; NOMO), nigdy spółka (All Good Things, "
+                      "Delta Industries). Przychód = zamówienia złożone; kwota opłacona jest obok.",
         "job": None,
         "health": None,
     },
     "ga4": {
         "label": "GA4 → Google Ads",
         "icon": "chart-line",
-        "what": "Koszt Google Ads per domena (fact_daily_traffic, wiersz __total__): mybed.pl, mybed.de, mittohome.pl.",
+        "what": "Koszt Google Ads per domena (fact_daily_traffic, wiersz __total__): mybed.pl, mybed.de, mittohome.pl, nomosleep.pl.",
         "how": "Z hurtowni dash. mybed.de raportuje w EUR — przeliczamy na PLN kursem z danego dnia.",
         "cadence": "raz dziennie (ok. 6:00)",
         "processing": "Kolumna „Google Ads” w tabeli wydatków per sklep.",
@@ -82,7 +89,7 @@ SOURCES: dict[str, dict] = {
         "label": "IdeaERP",
         "icon": "store",
         "what": "Dzisiejsze zamówienia i przychód (do tej pory) — jedyne źródło danych z bieżącego dnia.",
-        "how": "API IdeaERP, metryki per sklep.",
+        "how": "API IdeaERP; sklep rozpoznajemy po numerze zamówienia (Shoper…-1/-2/-3, Shopify…, NOMO-…), nie po spółce w ERP.",
         "cadence": "co godzinę (:05)",
         "processing": "Podsumowanie dnia i tygodnia pokazują „dziś do tej pory”.",
         "job": "ideaerp_sync",
@@ -111,7 +118,7 @@ SECTION_SOURCES: dict[str, list[str]] = {
     "showrooms": ["dash"],
     "calendar": ["calendar"],
     "awaiting": ["whatsapp", "gmail"],
-    "commitments": ["whatsapp"],
+    "commitments": ["whatsapp", "gmail"],
     "chats": ["whatsapp"],
     "email": ["gmail"],
     "os_me": ["os"],

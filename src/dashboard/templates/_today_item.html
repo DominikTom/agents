@@ -1,0 +1,25 @@
+{% from "_macros.html" import icon %}
+<div class="row-item !py-2.5" id="it-{{ r.id }}" data-kind-row="{{ r.kind }}">
+  <span class="badge mt-0.5 shrink-0 {{ kind_cls[r.kind] }}">{{ r.kind_label }}</span>
+  <div class="min-w-0 flex-1">
+    <div class="flex flex-wrap items-center gap-1.5">
+      <span class="text-sm font-medium text-ink">{{ r.title }}</span>
+      {% if r.overdue %}<span class="badge bg-red-50 font-mono text-red-700">{{ icon("clock", "h-3 w-3") }} po terminie {{ r.due[8:10] }}.{{ r.due[5:7] }}</span>
+      {% elif r.due_today %}<span class="badge bg-amber-50 text-amber-700">na dziś</span>
+      {% elif r.due %}<span class="badge bg-surface-2 font-mono text-ink-muted">{{ r.due[8:10] }}.{{ r.due[5:7] }}</span>
+      {% elif r.due_hint %}<span class="badge bg-surface-2 text-ink-muted">{{ r.due_hint }}</span>{% endif %}
+      {% if r.new_today %}<span class="badge bg-primary-soft text-primary-ink">nowe</span>{% endif %}
+    </div>
+    <div class="mt-0.5 text-xs text-ink-muted">
+      {% if r.who %}{{ r.who }} · {% endif %}{% if r.link %}<a class="hover:text-ink" href="{{ r.link }}" {% if r.source == 'gmail' %}target="_blank" rel="noopener"{% endif %}>{{ r.source_label }}{% if r.where %}: {{ r.where[:70] }}{% endif %}</a>{% else %}{{ r.source_label }}{% endif %}
+      {% if r.since %} · {{ r.since|ago }}{% endif %}
+    </div>
+    {% if r.quote %}<div class="mt-1 border-l-2 border-line pl-2 text-xs italic text-ink-faint">„{{ r.quote[:220] }}”</div>{% endif %}
+    {% if r.note %}<div class="mt-1 text-xs text-ink-muted">{{ icon("info", "h-3 w-3") }} {{ r.note }}</div>{% endif %}
+  </div>
+  <div class="flex shrink-0 flex-wrap justify-end gap-1">
+    <button class="btn-ghost !px-2 !py-1 text-xs" title="Zrobione" onclick="itemStatus({{ r.id }}, 'done', this)">{{ icon("check", "h-3.5 w-3.5") }}<span class="hidden sm:inline">Zrobione</span></button>
+    <button class="btn-ghost !px-2 !py-1 text-xs" title="Przenieś na następny dzień roboczy" onclick="snooze({{ r.id }}, this)">{{ icon("arrow-right", "h-3.5 w-3.5") }}<span class="hidden sm:inline">Jutro</span></button>
+    <button class="btn-ghost !px-2 !py-1 text-xs" title="Nieaktualne" onclick="itemStatus({{ r.id }}, 'dismissed', this)">{{ icon("x", "h-3.5 w-3.5") }}</button>
+  </div>
+</div>

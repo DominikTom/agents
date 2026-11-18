@@ -1,0 +1,144 @@
+{% from "_macros.html" import icon, empty %}
+{% set kind_cls = {
+  "decyzja": "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
+  "odpowiedz": "bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300",
+  "zadanie": "bg-primary-soft text-primary-ink",
+  "os": "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
+  "czekam": "bg-surface-2 text-ink-muted",
+} %}
+
+{% if d.warnings %}
+<div class="mb-4 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+  <span class="mt-0.5 shrink-0">{{ icon("triangle-alert") }}</span>
+  <div><span class="font-semibold">Dane niepełne:</span> {{ d.warnings|join(" · ") }}. Twoje odpowiedzi z tego kanału nie są widoczne — sprawy mogą wyglądać na otwarte, choć są załatwione.
+    {% if "WhatsApp" in d.warnings|join(" ") %}<a class="ml-1 font-semibold underline" href="/sources/whatsapp">Połącz WhatsApp</a>{% endif %}</div>
+</div>
+{% endif %}
+
+<div class="mb-4 flex flex-wrap gap-2">
+  {% for k, lbl in [("decyzja", "Decyzje"), ("odpowiedz", "Odpowiedzi"), ("zadanie", "Do zrobienia"), ("os", "Zadania OS"), ("czekam", "Czekasz na")] %}
+  <button type="button" class="chip" data-filter="{{ k }}" onclick="setFilter('{{ k }}')">
+    <span class="badge {{ kind_cls[k] }} !px-1.5">{{ d.counts[k] }}</span> {{ lbl }}
+  </button>
+  {% endfor %}
+</div>
+
+<div class="grid grid-cols-1 gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
+  {# ── Mini calendar ── #}
+  <section class="card order-2 overflow-hidden lg:order-1">
+    <div class="panel-head"><h3 class="section-title flex items-center gap-1.5">{{ icon("calendar", "text-ink-faint") }}Kalendarz</h3><span class="badge bg-surface-2 font-mono text-ink-muted">{{ d.events|length }}</span></div>
+    {% set all_day = d.events|selectattr("all_day")|list %}
+    {% if all_day %}
+    <div class="border-b border-line px-3 py-2 space-y-1">
+      {% for e in all_day %}<div class="truncate rounded-md bg-surface-2 px-2 py-1 text-xs text-ink-muted">cały dzień · {{ e.title }}</div>{% endfor %}
+    </div>
+    {% endif %}
+    {% set timed = d.events|rejectattr("all_day")|list %}
+    {% set first = [7 * 60] + timed|map(attribute="start_min")|select|list %}
+    {% set last = [19 * 60] + timed|map(attribute="end_min")|select|list %}
+    {% set t0 = (first|min // 60) * 60 %}
+    {% set t1 = ((last|max + 59) // 60) * 60 %}
+    {% set span = t1 - t0 %}
+    <div class="relative mx-3 my-3" style="height: {{ (span // 60) * 46 }}px">
+      {% for h in range(t0 // 60, t1 // 60 + 1) %}
+      <div class="absolute left-0 right-0 border-t border-line/70" style="top: {{ ((h * 60 - t0) / span * 100)|round(3) }}%">
+        <span class="absolute -top-2 left-0 bg-surface pr-1 font-mono text-[10px] text-ink-faint">{{ "%02d"|format(h) }}:00</span>
+      </div>
+      {% endfor %}
+      {% for e in timed %}
+      {% set top = ((e.start_min - t0) / span * 100)|round(3) %}
+      {% set height = ([e.end_min - e.start_min, 20]|max / span * 100)|round(3) %}
+      <a {% if e.link %}href="{{ e.link }}" target="_blank" rel="noopener"{% endif %}
+         class="absolute left-11 right-0 overflow-hidden rounded-lg border border-primary/30 bg-primary-soft px-2 py-1 text-[11px] leading-tight text-primary-ink hover:border-primary/60"
+         style="top: {{ top }}%; height: {{ height }}%" title="{{ e.title }}{% if e.people %} · {{ e.people|join(', ') }}{% endif %}">
+        <span class="font-mono">{{ e.start }}{% if e.end %}–{{ e.end }}{% endif %}</span> <span class="font-semibold">{{ e.title }}</span>
+        {% if e.where %}<span class="block truncate text-primary-ink/70">{{ e.where }}</span>{% endif %}
+      </a>
+      {% endfor %}
+      <div id="now-line" class="pointer-events-none absolute left-9 right-0 hidden border-t-2 border-red-500" data-start="{{ t0 }}" data-end="{{ t1 }}">
+        <span class="absolute -left-1 -top-[5px] h-2 w-2 rounded-full bg-red-500"></span>
+      </div>
+    </div>
+    {% if not d.events %}{{ empty("Dziś bez spotkań.", "calendar") }}{% endif %}
+  </section>
+
+  {# ── Plan of the day ── #}
+  <section class="card order-1 overflow-hidden lg:order-2">
+    <div class="panel-head"><h3 class="section-title flex items-center gap-1.5">{{ icon("list-checks", "text-ink-faint") }}Plan dnia</h3>
+      <span class="hidden text-xs text-ink-faint sm:inline">najpierw po terminie i na dziś, potem decyzje, odpowiedzi, zadania</span></div>
+
+    {% for r in d.plan if r.kind != "czekam" %}
+    {% include "_today_item.html" %}
+    {% endfor %}
+
+    {% for r in d.replies %}
+    {% set row_id = "rp-" ~ loop.index %}
+    <div class="row-item !py-2.5" id="{{ row_id }}" data-kind-row="odpowiedz">
+      <span class="badge mt-0.5 shrink-0 {{ kind_cls['odpowiedz'] }}">Odpowiedz</span>
+      <div class="min-w-0 flex-1">
+        <div class="text-sm font-medium text-ink">{{ r.title }}</div>
+        <div class="mt-0.5 text-xs text-ink-muted">
+          {{ r.who }} · {% if r.link %}<a class="hover:text-ink" href="{{ r.link }}" {% if r.channel == 'gmail' %}target="_blank" rel="noopener"{% endif %}>{{ r.source_label }}{% if r.channel == 'gmail' and r.where %}: {{ r.where[:70] }}{% endif %}</a>{% else %}{{ r.source_label }}{% endif %}
+          · <span class="font-mono {{ 'text-red-600' if r.waiting_h >= 24 else '' }}">czeka {{ r.waiting_h }} h</span>{% if r.count and r.count > 1 %} · {{ r.count }} wiad.{% endif %}
+          {% if r.important %}<span class="badge ml-1 bg-red-50 text-red-700">ważne</span>{% endif %}
+        </div>
+      </div>
+      <div class="flex shrink-0 gap-1">
+        <button class="btn-ghost !px-2 !py-1 text-xs" title="Odpowiedziałem / nie wymaga odpowiedzi" onclick="handled('{{ r.channel }}', '{{ r.ref }}', '{{ row_id }}', this)">{{ icon("check", "h-3.5 w-3.5") }} Obsłużone</button>
+      </div>
+    </div>
+    {% endfor %}
+
+    {% for t in d.os %}
+    <div class="row-item !py-2.5" data-kind-row="os">
+      <span class="badge mt-0.5 shrink-0 {{ kind_cls['os'] }}">Zadanie OS</span>
+      <div class="min-w-0 flex-1">
+        <div class="text-sm font-medium text-ink">{% if t.link %}<a class="hover:underline" href="{{ t.link }}" target="_blank" rel="noopener">{{ t.title }}</a>{% else %}{{ t.title }}{% endif %}</div>
+        <div class="mt-0.5 text-xs text-ink-muted">{% if t.who %}{{ t.who }} · {% endif %}{{ t.status or "" }}
+          {% if t.overdue %}<span class="badge ml-1 bg-red-50 font-mono text-red-700">po terminie {{ t.due }}</span>{% elif t.due_today %}<span class="badge ml-1 bg-surface-2 text-ink-muted">na dziś</span>{% endif %}</div>
+      </div>
+    </div>
+    {% endfor %}
+
+    {% set waiting = d.plan|selectattr("kind", "equalto", "czekam")|list %}
+    {% if waiting %}
+    <div class="border-t border-line bg-surface-2/40 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Czekasz na innych (na dziś / po terminie / nowe)</div>
+    {% for r in waiting %}{% include "_today_item.html" %}{% endfor %}
+    {% endif %}
+
+    {% if not d.plan and not d.replies and not d.os %}{{ empty("Nic otwartego na dziś.", "circle-check") }}{% endif %}
+  </section>
+</div>
+
+<div class="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
+  {% if d.answered_elsewhere %}
+  <section class="card overflow-hidden">
+    <div class="panel-head"><h3 class="section-title">Odpisałeś innym kanałem — sprawdź</h3><span class="badge bg-surface-2 font-mono text-ink-muted">{{ d.answered_elsewhere|length }}</span></div>
+    <p class="px-4 pt-2 text-xs text-ink-muted">Ta osoba napisała w jednym kanale, a Ty odezwałeś się do niej później w innym (WhatsApp ↔ mail). Nie ma ich w raportach; jeśli temat jest otwarty, otwórz rozmowę.</p>
+    {% for r in d.answered_elsewhere %}
+    {% set row_id = "ae-" ~ loop.index %}
+    <div class="row-item !py-2" id="{{ row_id }}">
+      <div class="min-w-0 flex-1 text-sm"><span class="font-medium text-ink">{{ r.who }}</span> <span class="text-ink-muted">· {{ r.source_label }} · {{ r.title[:120] }}</span>
+        <div class="text-xs text-ink-faint">odezwałeś się {{ r.answered_elsewhere|ago }}{% if r.link %} · <a class="hover:text-ink" href="{{ r.link }}" {% if r.channel == 'gmail' %}target="_blank" rel="noopener"{% endif %}>otwórz</a>{% endif %}</div></div>
+      <button class="btn-ghost !px-2 !py-1 text-xs" onclick="handled('{{ r.channel }}', '{{ r.ref }}', '{{ row_id }}', this)">{{ icon("check", "h-3.5 w-3.5") }} Obsłużone</button>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  <section class="card overflow-hidden">
+    <div class="panel-head"><h3 class="section-title">Załatwione dziś</h3><span class="badge bg-surface-2 font-mono text-ink-muted">{{ d.closed|length }}</span></div>
+    {% for c in d.closed %}
+    <div class="row-item !py-2">
+      <span class="mt-0.5 shrink-0 text-emerald-600">{{ icon("circle-check", "h-4 w-4") }}</span>
+      <div class="min-w-0 flex-1">
+        <div class="text-sm text-ink-muted line-through decoration-ink-faint/50">{{ c.title }}</div>
+        <div class="text-xs text-ink-faint">{{ c.resolution or ("zamknięte przez Ciebie" if c.resolved_by == "user" else "zamknięte") }} · {{ c.resolved_at|hm }}</div>
+      </div>
+      <button class="btn-ghost !px-2 !py-1 text-xs" onclick="itemStatus({{ c.id }}, 'open', this)">Przywróć</button>
+    </div>
+    {% else %}
+    {{ empty("Jeszcze nic. Sprawy znikają same, gdy odpiszesz w dowolnym kanale albo powiesz to w czacie z Claude.", "circle-check") }}
+    {% endfor %}
+  </section>
+</div>

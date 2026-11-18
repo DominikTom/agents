@@ -165,7 +165,7 @@ def test_kpi_periods_and_table():
     week_cards = headline_cards(kpi_data(o, {**cfg, "periods": ["7"]}))
     assert week_cards[0]["tone"] == "good" and week_cards[2]["tone"] == "neutral"  # spend deltas are never red/green
     t7 = tables(data)[1]
-    assert t7["columns"] == ["Razem", "mybed.pl", "mybed.de", "MittoHome"]  # rows = metrics, columns = shops
+    assert t7["columns"] == ["Razem", "mybed.pl", "mybed.de", "MittoHome", "NOMO"]  # rows = metrics, columns = shops
     assert t7["rows"][0]["cells"][0]["value"] == "1\u00a0400" and t7["rows"][0]["cells"][0]["pct"] == "+100,0%"
     assert t7["rows"][0]["unit"] == "zł" and t7["rows"][1]["unit"] == ""
 
@@ -197,7 +197,7 @@ def test_new_auto_enabled_section_lands_next_to_its_neighbour():
     ]}}
     keys = [s["key"] for s in merge_profiles(stored)["morning_briefing"]["sections"]]
     enabled = {s["key"]: s["enabled"] for s in merge_profiles(stored)["morning_briefing"]["sections"]}
-    assert keys.index("team_updates") == keys.index("chats") + 1 and enabled["team_updates"]
+    assert keys.index("team_updates") == keys.index("marketing") + 1 and enabled["team_updates"]
     assert not enabled["projects"]  # regular new sections stay off
 
 
@@ -513,6 +513,11 @@ def test_erp_orders_map_to_dash_shops():
     assert classify_order({"currency": "EUR"}, "Delta Industries") == "mybed.de"
     assert classify_order({}, "All Good Things Sp z o o") == "inne"
     assert classify_order({"name": "ZAM/0291/2026"}, "Delta Industries") == "manual"  # hand-entered, as in the dash
+    # the shop comes from the order number, never from the ERP company (All Good Things runs NOMO)
+    assert classify_order({"name": "NOMO-127"}, "All Good Things Sp z o o") == "nomosleep.pl"
+    assert classify_order({"name": "Shoper49296-3", "currency": "CZK"}, "Delta Industries") == "mojepostel.cz"
+    assert classify_order({"name": "Shoper30015-2", "currency": "PLN"}, "X") == "mybed.de"
+    assert classify_order({"name": "NOMO-TEST-AGT-20261027"}, "All Good Things") == "test"
     assert order_total({"order_lines": [{"order_line_gross": "100.5"}, {"order_line_gross": 20}], "delivery_price": 9}) == 129.5
 
 
@@ -530,3 +535,215 @@ def test_erp_fallback_marks_uncovered_shop_unknown():
     assert "wstępnie prosto z IdeaERP" in o["missing_note"] and "mittohome.pl" in o["missing_note"]
     o2 = build_overview(hist + erp_rows, [], [], ref, sales_source="IdeaERP")
     assert {r["shop"]: r for r in o2["periods"]["1"]["rows"]}["Razem"]["revenue"]["v"] == 203627
+
+
+def test_revenue_paid_basis_shop_aliases_and_unassigned_ad_accounts():
+    from src.connectors.dash import alias_shops
+
+    ref = date(2026, 11, 17)
+    rev = alias_shops([
+        {"date": ref.isoformat(), "source_shop": "mybed.pl", "orders_count": 12, "orders_paid": 10,
+         "revenue_gross_pln": 12000, "revenue_paid_pln": 10000},
+        {"date": ref.isoformat(), "source_shop": "shoper_unknown", "orders_count": 2, "orders_paid": 1,
+         "revenue_gross_pln": 31000, "revenue_paid_pln": 300},
+        {"date": ref.isoformat(), "source_shop": "nomosleep.pl", "orders_count": 2, "orders_paid": 2,
+         "revenue_gross_pln": 1800, "revenue_paid_pln": 1800},
+    ])
+    meta = [{"date": ref.isoformat(), "platform": "meta", "account_id": "act_1376753327967692", "spend": 300},
+            {"date": ref.isoformat(), "platform": "meta", "account_id": "act_999", "spend": 50}]
+    ads = normalize_spend(meta, [], rev)
+    o = build_overview(rev, ads, [], ref, basis="paid")
+    shops = {s["shop"]: s for s in o["shops"]}
+    assert shops["mybed.pl"]["revenue_pln"] == 10000 and shops["mybed.pl"]["orders"] == 10
+    assert shops["mybed.pl"]["nieoplacone_i_anulowane_pln"] == 2000 and shops["mybed.pl"]["oplacone_pln"] == 10000
+    assert shops["mojepostel.cz"]["revenue_pln"] == 300 and shops["mojepostel.cz"]["brand"] == "MyBed"
+    assert o["total"]["revenue"] == 12100 and o["revenue_basis"] == "paid"
+    m = o["marketing"]
+    nomo = next(r for r in m["per_sklep"] if r["shop"] == "nomosleep.pl")
+    assert nomo["suma_dzien"] == 300 and nomo["marka"] == "NOMO"
+    assert m["nieprzypisane_konta"] == [{"konto": "act_999", "dzien": 50, "7_dni": 50}]
+    assert {b["marka"]: b["suma_dzien"] for b in m["per_marka"]} == {"MyBed": 0, "MittoHome": 0, "NOMO": 300}
+    gross = build_overview(rev, ads, [], ref)
+    assert gross["total"]["revenue"] == 44800 and gross["revenue_basis"] == "gross"
+    # a mapping saved in the panel wins over the built-in one
+    remapped = normalize_spend(meta, [], rev, account_map={"act_999": "mybed.pl"})
+    assert [a["shop"] for a in remapped] == ["nieprzypisane", "mybed.pl"]
+
+
+def test_search_terms_drop_polish_endings_and_noise():
+    from src.processing.resolution import note_matches, search_terms
+
+    assert search_terms("Podpisz umowę Eli Janas", "Ela Janas") == ["podpis", "umow", "jana"]
+    assert "dominik" not in search_terms("Dominik wyślij fakturę do Comfy")
+    assert note_matches({"text": "Umowa Eli podpisana"}, {"title": "Podpisz umowę Eli Janas", "counterpart": "Ela Janas"})
+    assert not note_matches({"text": "PayU dla NOMO ogarnięte"}, {"title": "Podpisz umowę Eli Janas"})
+
+
+def test_strip_quoted_keeps_only_the_new_part_of_a_mail():
+    from src.processing.email_digest import strip_quoted
+
+    body = "Akceptuję 75 tys.\n\nW dniu 17.11.2026 o 08:22 Maciej Żydziak napisał:\n> stara treść\n> więcej"
+    assert strip_quoted(body) == "Akceptuję 75 tys."
+    assert strip_quoted("Ok\n> cytat\nDzięki") == "Ok\nDzięki"
+
+
+def test_outbound_contacts_merge_whatsapp_and_mail():
+    from datetime import datetime, timezone
+
+    from src.storage.database import merge_outbound
+
+    t1 = datetime(2026, 11, 18, 9, tzinfo=timezone.utc)
+    t2 = datetime(2026, 11, 18, 11, tzinfo=timezone.utc)
+    out = merge_outbound([{"entity_id": 7, "ts": t1}],
+                         [{"timestamp": t2, "rcpt": "Ela <ela@mybed.pl>, x@y.pl"}],
+                         {"ela@mybed.pl": 7})
+    assert out["entities"] == {7: t2} and out["emails"]["x@y.pl"] == t2
+
+
+def test_resolver_closes_only_with_evidence_and_respects_verdicts():
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+
+    from src.processing.resolution import ItemResolver
+
+    t = datetime(2026, 11, 18, 8, tzinfo=timezone.utc)
+
+    class FakeDB:
+        closed, checked = [], []
+
+        async def get_crosscheck_candidates(self, limit=120):
+            return [{"id": 1, "direction": "ask", "title": "Podpisz umowę Eli Janas", "counterpart": "Ela Janas",
+                     "source": "whatsapp", "chat_name": "Kadry", "source_at": t, "xchecked_at": None},
+                    {"id": 2, "direction": "ask", "title": "Daj termin prezentacji Thulium", "counterpart": "Kamil",
+                     "source": "gmail", "chat_name": "Thulium", "source_at": t, "xchecked_at": None},
+                    {"id": 3, "direction": "mine", "title": "Wyślij cennik B2B", "counterpart": "", "source": "whatsapp",
+                     "chat_name": "X", "source_at": t, "xchecked_at": t + timedelta(hours=5)}]
+
+        async def list_notes(self, since=None, limit=50, active_only=True):
+            return [{"id": 9, "text": "Umowa Eli podpisana", "about": None, "created_at": t + timedelta(hours=1)}]
+
+        async def resolve_entity(self, source, name):
+            return None
+
+        async def entity_emails(self, eid):
+            return []
+
+        async def find_evidence(self, since, terms, entity_id=None, emails=None, limit=10):
+            if "cennik" in terms:  # old evidence only (ingested before the last check) → skipped, no AI call
+                return [{"id": 50, "source": "whatsapp", "timestamp": t, "ingested_at": t + timedelta(hours=1),
+                         "metadata": {}, "body": "cennik", "from_me": True}]
+            if "thuliu" in terms:
+                return [{"id": 51, "source": "gmail", "timestamp": t, "ingested_at": t + timedelta(hours=1),
+                         "metadata": {"from_me": False}, "title": "Thulium", "body": "Kiedy prezentacja?", "from_me": False}]
+            return []
+
+        async def auto_close_commitment(self, cid, status, reason):
+            self.closed.append((cid, status, reason))
+
+        async def mark_crosschecked(self, ids):
+            self.checked.extend(ids)
+
+    class FakeAI:
+        calls = []
+
+        async def extract(self, **kw):
+            self.calls.append(kw["content"])
+            return {"items": [{"id": 1, "status": "done", "reason": "Notatka: umowa podpisana", "evidence": "n9"},
+                              {"id": 2, "status": "open", "reason": "nikt nie odpowiedział", "evidence": ""},
+                              {"id": 99, "status": "done", "reason": "obce id", "evidence": ""}]}
+
+    db, ai = FakeDB(), FakeAI()
+    stats = asyncio.run(ItemResolver(db, ai).run())
+    assert db.closed == [(1, "done", "Notatka: umowa podpisana")]
+    assert sorted(db.checked) == [1, 2] and stats["skipped"] == 1 and len(ai.calls) == 1
+    assert "NOTATKA DOMINIKA" in ai.calls[0] and "[e51]" in ai.calls[0]
+
+
+def test_data_health_warns_when_whatsapp_is_silent():
+    import asyncio
+    from datetime import datetime, timedelta
+
+    from src.common.timeutil import WARSAW
+    from src.reports.health import data_health, health_instruction
+
+    current = datetime(2026, 11, 18, 10, 0, tzinfo=WARSAW)
+
+    class FakeDB:
+        async def get_ingestion_stats(self):
+            return [{"source": "whatsapp", "last_event": current - timedelta(days=10)},
+                    {"source": "gmail", "last_event": current - timedelta(minutes=20)}]
+
+        async def last_ingest_at(self, source):
+            return current - timedelta(minutes=10)
+
+        async def get_setting(self, key, default=None):
+            return {}
+
+    h = asyncio.run(data_health(FakeDB(), current))
+    assert len(h["warnings"]) == 1 and h["warnings"][0].startswith("WhatsApp nie dostarcza wiadomości od 08.11")
+    assert not h["sources"]["whatsapp"]["ok"] and h["sources"]["gmail"]["ok"]
+    assert "Nie pisz „brak nowych rozmów”" in health_instruction(h) and health_instruction({"warnings": []}) == ""
+
+
+def test_compact_migration_shortens_saved_reports_once_and_keeps_user_settings():
+    import asyncio
+
+    from src.reports.profiles import migrate_profiles
+
+    class FakeDB:
+        def __init__(self):
+            self.s = {"reports": {"daily_wrap": {"time": "16:30", "length": "standard", "instructions": "Bez emoji",
+                                                 "sections": [{"key": "sales", "enabled": True, "note": "tylko PL"},
+                                                              {"key": "risks", "enabled": True, "note": ""}]}}}
+
+        async def get_setting(self, key, default=None):
+            return self.s.get(key, default)
+
+        async def set_setting(self, key, value):
+            self.s[key] = value
+
+    db = FakeDB()
+    assert asyncio.run(migrate_profiles(db)) == ["compact_2026_11"]
+    wrap = db.s["reports"]["daily_wrap"]
+    assert wrap["length"] == "short" and wrap["time"] == "16:30" and wrap["instructions"] == "Bez emoji"
+    on = [s["key"] for s in wrap["sections"] if s["enabled"]]
+    assert on == ["top", "awaiting", "commitments", "calendar", "sales"]
+    assert next(s for s in wrap["sections"] if s["key"] == "sales")["note"] == "tylko PL"
+    assert asyncio.run(migrate_profiles(db)) == []  # applied once
+    db.s["reports"]["daily_wrap"]["length"] = "detailed"  # a later choice in the Studio stays
+    asyncio.run(migrate_profiles(db))
+    assert db.s["reports"]["daily_wrap"]["length"] == "detailed"
+
+
+def test_day_view_rows_sort_overdue_first_then_kind():
+    from datetime import date, datetime, timezone
+
+    from src.processing.day_view import item_link, item_row, sort_key
+
+    ref = date(2026, 11, 18)
+    t = datetime(2026, 11, 18, 8, tzinfo=timezone.utc)
+    rows = [item_row({"id": 1, "direction": "ask", "kind": "zadanie", "title": "a", "source": "gmail",
+                      "chat_jid": "gmail:abc", "source_at": t}, ref),
+            item_row({"id": 2, "direction": "ask", "kind": "decyzja", "title": "b", "source": "whatsapp",
+                      "chat_jid": "1@s.whatsapp.net", "source_at": t}, ref),
+            item_row({"id": 3, "direction": "mine", "kind": "zadanie", "title": "c", "source": "manual",
+                      "due_date": date(2026, 11, 17), "source_at": t}, ref),
+            item_row({"id": 4, "direction": "theirs", "kind": None, "title": "d", "source": "whatsapp", "source_at": t}, ref)]
+    assert [r["id"] for r in sorted(rows, key=sort_key)] == [3, 2, 1, 4]
+    assert rows[3]["kind"] == "czekam" and rows[2]["overdue"] and rows[0]["new_today"]
+    assert item_link({"chat_jid": "gmail:abc"}) == "https://mail.google.com/mail/#all/abc"
+    assert item_link({"chat_jid": "1@s.whatsapp.net"}) == "/chats/1@s.whatsapp.net" and item_link({}) is None
+
+
+def test_manual_due_dates():
+    from datetime import date
+
+    import pytest
+
+    from src.processing.items import parse_due
+
+    assert parse_due("2026-11-25") == date(2026, 11, 25)
+    assert parse_due("") is None
+    assert parse_due("25.11.2026") == date(2026, 11, 25)
+    with pytest.raises(ValueError):
+        parse_due("kiedyś")

@@ -209,11 +209,15 @@ class IdeaERPConnector(BaseConnector):
 
 
 # ── Yesterday's sales straight from the ERP (fallback while the dash warehouse is not loaded yet) ──────────
-# The dash builds source_shop from the order number (Shopify… = mittohome.pl, Shoper… = mybed.pl / mybed.de by
-# currency, Amazon… = amazon.de); the same rule is applied here so both sources agree.
+# The shop comes from the order NUMBER, never from the ERP "shop" (= the invoicing company: Delta Industries,
+# All Good Things…, one company runs several shops). Same rule as the new ERP (panel zamówień):
+# Shoper<id>-1 mybed.pl, -2 mybed.de, -3 mojepostel.cz, Shopify… mittohome.pl, NOMO-… nomosleep.pl,
+# Amazon… amazon.de, ZAM/… hand-entered (showrooms, "manual" in the dash).
 REF_KEYS = ("name", "number", "order_number", "numer", "reference", "client_order_ref", "shop_order_number",
             "external_number", "external_id", "origin")
-PREFIX_SHOP = (("shopify", "mittohome.pl"), ("amazon", "amazon.de"), ("nomo", "unknown"), ("zam/", "manual"))
+PREFIX_SHOP = (("shopify", "mittohome.pl"), ("amazon", "amazon.de"), ("zam/", "manual"))
+SHOPER_SUFFIX = {"1": "mybed.pl", "2": "mybed.de", "3": "mojepostel.cz"}
+TEST_PREFIXES = ("nomotest", "nomo-test", "test")
 
 
 def order_ref(order: dict) -> str:
@@ -225,13 +229,22 @@ def order_ref(order: dict) -> str:
 
 
 def classify_order(order: dict, shop_name: str) -> str:
-    """source_shop the way the dash names it."""
+    """Shop of one ERP order, from its number (see above); "test" for test orders, "inne" when unknown."""
     currency = (order.get("currency") or "PLN").upper()
     ref = order_ref(order).lower()
+    if ref.startswith(TEST_PREFIXES):
+        return "test"
     for prefix, shop in PREFIX_SHOP:
         if ref.startswith(prefix):
             return shop
-    if ref.startswith("shoper") or shop_name.lower().startswith("delta industries"):
+    if ref.startswith("nomo"):
+        return "nomosleep.pl"
+    if ref.startswith("shoper"):
+        suffix = ref.rsplit("-", 1)[-1] if "-" in ref else ""
+        if suffix in SHOPER_SUFFIX:
+            return SHOPER_SUFFIX[suffix]
+        return "mybed.de" if currency == "EUR" else "mybed.pl"
+    if not ref and shop_name.lower().startswith("delta industries"):
         return "mybed.de" if currency == "EUR" else "mybed.pl"
     return "inne"
 

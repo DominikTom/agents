@@ -21,14 +21,14 @@ SECTION_CATALOG: dict[str, dict] = {
     },
     "sales": {
         "label": "Sprzedaż",
-        "description": "Zamówienia i przychód per sklep z porównaniami (dash), a po południu też wynik bieżącego dnia.",
-        "instruction": "Tabela lub krótka lista per sklep: zamówienia, przychód, zmiana vs dzień wcześniej i vs ten sam dzień tydzień temu. Potem 1–2 zdania interpretacji (co odstaje i możliwy powód). Wyróżnij spadki powyżej 25%.",
+        "description": "Zamówienia i przychód per sklep (mybed.pl, mybed.de, mojepostel.cz, MittoHome, NOMO) z porównaniami (dash), a po południu też wynik bieżącego dnia.",
+        "instruction": "1–3 zdania: co odstaje w sprzedaży per sklep (zmiana vs dzień wcześniej i vs ten sam dzień tydzień temu, spadki powyżej 25%) i możliwy powód. Tabelę dawaj tylko, gdy nie ma tabeli „Liczby”. Sklepy nazywaj jak w danych (mybed.pl, mybed.de, mojepostel.cz, MittoHome, NOMO) — nigdy nazwą spółki (All Good Things, Delta Industries).",
         "data": True,
     },
     "marketing": {
         "label": "Marketing i reklamy",
-        "description": "Wydatki reklamowe per sklep (mybed.pl, mybed.de, MittoHome), osobno Meta i Google Ads.",
-        "instruction": "Tabela: wiersz = sklep (mybed.pl, mybed.de, mittohome.pl), kolumny: Meta, Google Ads, Suma — za wczoraj i za 7 dni (w zł). Pod tabelą wiersz „Razem”. Nie licz MER ani ROAS. Potem 1–2 zdania tylko o tym, co odstaje (np. wydatki sklepu rosną, a sprzedaż spada; platforma z zerem, choć zwykle wydaje).",
+        "description": "Wydatki reklamowe per sklep i marka (MyBed: mybed.pl, mybed.de, mojepostel.cz; MittoHome; NOMO), osobno Meta i Google Ads.",
+        "instruction": "Tabela: wiersz = sklep (mybed.pl, mybed.de, MittoHome, NOMO; mojepostel.cz tylko gdy wydaje), kolumny: Meta, Google Ads, Suma — za wczoraj i za 7 dni (w zł). Pod tabelą wiersz „Razem”. Nie licz MER ani ROAS. Potem 1–2 zdania tylko o tym, co odstaje. Jeśli w danych są „nieprzypisane_konta”, napisz wprost, które konto reklamowe wydaje i nie jest przypisane do sklepu — nie doliczaj go do żadnej marki.",
         "data": True,
     },
     "showrooms": {
@@ -119,9 +119,10 @@ SECTION_CATALOG: dict[str, dict] = {
 }
 
 LENGTHS = {
-    "short": "Bardzo zwięźle: cały raport ma dać się przeczytać w 2 minuty. Maksymalnie 3 punkty na sekcję.",
-    "standard": "Zwięźle, ale z kontekstem: raport do przeczytania w 4–5 minut.",
-    "detailed": "Szczegółowo: pełny kontekst i wnioski, raport może mieć do 10 minut czytania.",
+    "short": "Bardzo krótko: cały tekst (bez tabeli „Liczby”) najwyżej ok. 250 słów — do przeczytania w minutę. "
+             "Najwyżej 3 punkty na sekcję, każdy w jednej linii. Pustą sekcję zamknij jednym zdaniem.",
+    "standard": "Zwięźle: cały tekst najwyżej ok. 500 słów, do przeczytania w 2–3 minuty. Najwyżej 5 punktów na sekcję.",
+    "detailed": "Szczegółowo: pełny kontekst i wnioski, najwyżej ok. 1000 słów.",
 }
 
 DAY_NAMES = ["Pn", "Wt", "Śr", "Cz", "Pt", "Sb", "Nd"]
@@ -159,12 +160,12 @@ DEFAULT_PROFILES: dict[str, dict] = {
         "email": True,
         "slack_channel": "",
         "model": REPORT_MODEL,
-        "length": "standard",
+        "length": "short",
         "instructions": "",
         "kpi": _kpi(["1", "7", "30"], ["revenue", "orders", "aov", "spend_meta", "spend_google", "spend_total"]),
         "sections": _sections(
-            ["top", "awaiting", "calendar", "sales", "marketing", "chats", "team_updates", "commitments", "os_me", "team", "email"],
-            ["projects", "showrooms", "topics", "risks", "plan", "slack"],
+            ["top", "calendar", "awaiting", "commitments", "sales", "marketing", "team_updates"],
+            ["chats", "os_me", "team", "email", "projects", "showrooms", "topics", "risks", "plan", "slack"],
         ),
     },
     "daily_wrap": {
@@ -177,12 +178,13 @@ DEFAULT_PROFILES: dict[str, dict] = {
         "email": True,
         "slack_channel": "",
         "model": REPORT_MODEL,
-        "length": "standard",
+        "length": "short",
         "instructions": "",
         "kpi": _kpi(["1", "7"], ["revenue", "orders", "spend_total"], per_shop=False),
         "sections": _sections(
-            ["top", "topics", "chats", "awaiting", "commitments", "sales", "calendar", "risks", "plan"],
-            ["email", "marketing", "os_me", "team", "team_updates", "projects", "showrooms", "slack"],
+            ["top", "awaiting", "commitments", "calendar", "sales"],
+            ["topics", "chats", "risks", "plan", "email", "marketing", "os_me", "team", "team_updates", "projects",
+             "showrooms", "slack"],
         ),
     },
     "weekly_review": {
@@ -195,7 +197,7 @@ DEFAULT_PROFILES: dict[str, dict] = {
         "email": True,
         "slack_channel": "",
         "model": REPORT_MODEL,
-        "length": "detailed",
+        "length": "standard",
         "instructions": "",
         "kpi": _kpi(["7", "30"], ["revenue", "orders", "aov", "spend_meta", "spend_google", "spend_total"]),
         "sections": _sections(
@@ -262,7 +264,42 @@ def merge_general(stored: dict | None) -> dict:
     return g
 
 
+# One-time changes of saved profiles, applied once per database (settings "reports_migrations").
+# compact_2026_11: Dominik asked for shorter reports — saved profiles move to the new compact length and section
+# set (instructions, times, recipients, notes of sections that stay, KPI choices are kept).
+MIGRATIONS = ["compact_2026_11"]
+
+
+def apply_compact_2026_11(stored: dict) -> dict:
+    out = copy.deepcopy(stored)
+    for key, p in out.items():
+        if key not in DEFAULT_PROFILES or not isinstance(p, dict):
+            continue
+        default = DEFAULT_PROFILES[key]
+        p["length"] = default["length"]
+        notes = {s.get("key"): s.get("note", "") for s in p.get("sections") or []}
+        p["sections"] = [{**s, "note": notes.get(s["key"], "")} for s in copy.deepcopy(default["sections"])]
+    return out
+
+
+async def migrate_profiles(db) -> list[str]:
+    """Run pending one-time profile migrations; returns the names applied."""
+    done = await db.get_setting("reports_migrations", []) or []
+    pending = [m for m in MIGRATIONS if m not in done]
+    if not pending:
+        return []
+    stored = await db.get_setting("reports", {}) or {}
+    if stored and "compact_2026_11" in pending:
+        await db.set_setting("reports", apply_compact_2026_11(stored))
+    await db.set_setting("reports_migrations", done + pending)
+    return pending
+
+
 async def load_profiles(db) -> dict[str, dict]:
+    try:
+        await migrate_profiles(db)
+    except Exception:  # a migration must never block reading the profiles
+        pass
     return merge_profiles(await db.get_setting("reports", {}))
 
 

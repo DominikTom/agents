@@ -41,13 +41,14 @@ DIGEST_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "direction": {"type": "string", "enum": ["mine", "ask", "theirs"]},
+                    "kind": {"type": "string", "enum": ["decyzja", "zadanie", "odpowiedz"]},
                     "counterpart": {"type": "string"},
                     "what": {"type": "string"},
                     "due_date": {"type": "string"},
                     "due_hint": {"type": "string"},
                     "evidence": {"type": "string"},
                 },
-                "required": ["direction", "counterpart", "what", "due_date", "due_hint", "evidence"],
+                "required": ["direction", "kind", "counterpart", "what", "due_date", "due_hint", "evidence"],
                 "additionalProperties": False,
             },
         },
@@ -59,7 +60,7 @@ DIGEST_SCHEMA = {
     "additionalProperties": False,
 }
 
-SYSTEM_PROMPT = """Jesteś asystentem Dominika Tomaszczyka — CEO i założyciela MyBed Group (marki: MyBed — łóżka tapicerowane, MittoHome — meble i dodatki, NOMO / NomoSleep — materace i sen, LepszySen.pl; sklepy mybed.pl, mybed.de, mittohome.pl; showroomy w kilku miastach). Czytasz jedną rozmowę z WhatsAppa z jednego dnia i przygotowujesz jej rzetelne streszczenie dla Dominika.
+SYSTEM_PROMPT = """Jesteś asystentem Dominika Tomaszczyka — CEO i założyciela MyBed Group (marki: MyBed — łóżka tapicerowane, sklepy mybed.pl, mybed.de i mojepostel.cz (Czechy); MittoHome — meble i dodatki, mittohome.pl; NOMO / NomoSleep — materace i sen, nomosleep.pl; LepszySen.pl; showroomy w kilku miastach; spółki: Delta Industries, All Good Things, MittoHome — spółka to nie marka). Czytasz jedną rozmowę z WhatsAppa z jednego dnia i przygotowujesz jej rzetelne streszczenie dla Dominika.
 
 Jak czytać zapis:
 - „Ja (Dominik)” to wiadomości Dominika; pozostałe osoby są podpisane nazwą, a gdy znamy ich rolę w firmie — rolą w nawiasie.
@@ -78,6 +79,7 @@ Co zwracasz:
   • mine — Dominik obiecał coś zrobić („wyślę”, „zadzwonię”, „dam znać do piątku”),
   • ask — ktoś wprost prosi Dominika o działanie/decyzję,
   • theirs — ktoś obiecał coś Dominikowi.
+  kind = decyzja (Dominik ma coś zatwierdzić / wybrać / zaakceptować), odpowiedz (ktoś czeka na jego odpowiedź lub informację), zadanie (konkretne działanie: wysłać, podpisać, przelać, zadzwonić).
   what = zwięzłe zadanie w trybie rozkazującym, zrozumiałe bez czytania czatu (np. „Wyślij Sandrze cennik B2B dla hotelu Arłamów”). counterpart = druga osoba. due_date = RRRR-MM-DD, jeśli termin wynika z rozmowy (licz względem daty rozmowy), inaczej pusty tekst; due_hint = oryginalne sformułowanie terminu albo pusty tekst. evidence = krótki cytat. Pomiń rzeczy już zrobione w tej samej rozmowie oraz grzecznościowe „odezwę się”.
 
 Pisz po polsku. Nie wymyślaj faktów spoza zapisu."""
@@ -201,9 +203,12 @@ class ChatDigester:
                 continue
             due = _parse_date(c.get("due_date"))
             fp = fingerprint("whatsapp", chat["jid"], direction, what)
+            kind = "czekam" if direction == "theirs" else (
+                c.get("kind") if c.get("kind") in ("decyzja", "zadanie", "odpowiedz") else "zadanie")
             await self.db.upsert_commitment({
                 "fingerprint": fp,
                 "direction": direction,
+                "kind": kind,
                 "title": what[:300],
                 "context": (c.get("evidence") or "")[:500],
                 "counterpart": (c.get("counterpart") or "")[:120],

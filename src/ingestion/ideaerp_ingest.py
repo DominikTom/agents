@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from src.common.config import get_env_optional
+from src.connectors.ideaerp import classify_order
 from src.storage.database import Database
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,8 @@ class IdeaERPMetricsIngestor:
                     start_utc = start_warsaw.astimezone(timezone.utc)
                     end_utc = end_warsaw.astimezone(timezone.utc)
 
+                    day_metrics: dict[tuple[str, str], float] = {}
+                    day_currency: dict[str, str] = {}
                     for shop in shops:
                         shop_id = shop["id"]
                         shop_name = shop["name"]
@@ -66,25 +69,38 @@ class IdeaERPMetricsIngestor:
                             shop_id, start_utc, end_utc,
                         )
 
-                        # Group by currency for store mapping
-                        by_currency: dict[str, list[dict]] = {}
+                        # One store per SHOP (from the order number: mybed.pl, nomosleep.pl, mojepostel.cz…),
+                        # never per ERP company — "All Good Things" or "Delta Industries" run several shops
+                        by_store: dict[tuple[str, str], list[dict]] = {}
                         for order in orders:
                             cur = order.get("currency") or "PLN"
-                            by_currency.setdefault(cur, []).append(order)
+                            store = classify_order(order, shop_name)
+                            if store == "test":
+                                continue
+                            if store == "inne":
+                                store = _resolve_store(shop_name, cur, store_mapping)
+                            by_store.setdefault((store, cur), []).append(order)
 
-                        for currency, currency_orders in by_currency.items():
-                            display_name = _resolve_store(shop_name, currency, store_mapping)
-                            metrics = _compute_metrics(currency_orders, currency)
-
+                        for (store, currency), store_orders in by_store.items():
+                            metrics = _compute_metrics(store_orders, currency)
                             for metric_name, value in metrics.items():
-                                await self.db.store_metric(
-                                    metric_date=target_date,
-                                    store=display_name,
-                                    metric_name=metric_name,
-                                    metric_value=value,
-                                    currency=currency,
-                                )
-                                stats["metrics_stored"] += 1
+                                day_metrics[(store, metric_name)] = day_metrics.get((store, metric_name), 0.0) + value
+                                day_currency[store] = currency
+
+                    for (store, metric_name), value in day_metrics.items():
+                        if metric_name == "avg_order_value":
+                            count = day_metrics.get((store, "orders_count")) or 0
+                            value = round(day_metrics.get((store, "revenue"), 0.0) / count, 2) if count else 0.0
+                        await self.db.store_metric(
+                            metric_date=target_date,
+                            store=store,
+                            metric_name=metric_name,
+                            metric_value=value,
+                            currency=day_currency.get(store),
+                        )
+                        stats["metrics_stored"] += 1
+                    # rows written before stores were split per shop (e.g. "All Good Things") must not linger
+                    await self.db.delete_metrics_except(target_date, {s for s, _ in day_metrics})
 
         except Exception as e:
             logger.error(f"IdeaERP metrics ingestion failed: {e}")

@@ -145,6 +145,38 @@ async def chat_digests(db: Database | None = None, day=None, force: bool = False
     return await _logged(db, "chat_digests", both())
 
 
+async def live_refresh(db: Database | None = None) -> dict | None:
+    """Every 15 min in the day: read new e-mail threads (items, "waiting for you"), then close open items that
+    Dominik already settled on another channel (other chats, e-mail, his notes). Feeds the live day view."""
+    from src.ai.client import AIClient
+    from src.processing.email_digest import EmailDigester
+    from src.processing.resolution import ItemResolver
+
+    if db is None:
+        async with database() as db:
+            return await live_refresh(db)
+
+    async def go():
+        ai = AIClient(db=db)
+        out: dict = {}
+        try:
+            out["email"] = await EmailDigester(db, ai).run()
+        except Exception as e:
+            logger.warning(f"E-mail digests failed: {e}")
+            out["email_error"] = str(e)[:200]
+        try:
+            res = await ItemResolver(db, ai).run()
+            out["resolved"] = {k: v for k, v in res.items() if k != "closed"}
+        except Exception as e:
+            logger.warning(f"Item resolver failed: {e}")
+            out["resolver_error"] = str(e)[:200]
+        if "email_error" in out and "resolver_error" in out:
+            out["error"] = f"{out['email_error']}; {out['resolver_error']}"
+        return out
+
+    return await _logged(db, "live_refresh", go())
+
+
 async def topic_extraction(db: Database | None = None) -> dict | None:
     from src.ai.client import AIClient
     from src.ingestion.topic_extractor import TopicExtractor
@@ -292,4 +324,5 @@ JOBS = {
     "slack_sync": ("Synchronizacja Slack", slack_sync),
     "team_updates": ("Raporty dnia zespołu (AI)", team_updates),
     "whatsapp_watchdog": ("Alarm: WhatsApp rozłączony", whatsapp_watchdog),
+    "live_refresh": ("Na żywo: maile i zamykanie spraw", live_refresh),
 }

@@ -44,7 +44,7 @@ SCHEMA = {
     "additionalProperties": False,
 }
 
-SYSTEM = """Pilnujesz listy zobowiązań Dominika Tomaszczyka (CEO MyBed Group) wyłapanych z jednej rozmowy na WhatsAppie. Dostajesz otwarte pozycje z tej rozmowy i jej dalszy ciąg. Dla KAŻDEJ pozycji zdecyduj:
+SYSTEM = """Pilnujesz listy zobowiązań Dominika Tomaszczyka (CEO MyBed Group) wyłapanych z jednej rozmowy (WhatsApp albo wątek mailowy). Dostajesz otwarte pozycje z tej rozmowy i jej dalszy ciąg. Dla KAŻDEJ pozycji zdecyduj:
 
 - done — z rozmowy wynika, że sprawa jest załatwiona: przy „obiecałeś”/„prośba do Ciebie” Dominik odpowiedział, wysłał, zdecydował, potwierdził zrobienie; przy „obiecane Tobie” druga strona to dostarczyła/zrobiła/potwierdziła. Odpowiedź Dominika na prośbę (nawet „nie”, „później zdecyduję z datą”) zamyka prośbę o odpowiedź/decyzję.
 - obsolete — sprawa przestała być aktualna: odwołana, zmieniona na coś innego, rozwiązana inaczej, ktoś napisał, że nie trzeba.
@@ -89,7 +89,7 @@ class CommitmentReconciler:
     async def _chat(self, jid: str, items: list[dict]) -> dict | None:
         since = min(c["source_at"] for c in items if c.get("source_at")) if any(c.get("source_at") for c in items) else None
         checked = [c.get("checked_until") for c in items]
-        messages = await self.db.get_chat_messages(jid, since=since, limit=MAX_MESSAGES)
+        messages = await self._messages(jid, since)
         if not messages:
             return None
         last_ts = messages[-1]["timestamp"]
@@ -110,7 +110,8 @@ class CommitmentReconciler:
             body = (m.get("body") or "").replace("\n", " ⏎ ")[:800]
             quoted = f" ↩ na: „{meta['quoted_text'][:120]}”" if meta.get("quoted_text") else ""
             lines.append(f"[{to_local(m['timestamp']).strftime('%d.%m %H:%M')}] {who}:{quoted} {body}")
-        content = (f"Czat: {items[0].get('chat_name') or jid}\nDziś: {today().isoformat()}\n\n"
+        where = "Wątek mailowy" if jid.startswith("gmail:") else "Czat"
+        content = (f"{where}: {items[0].get('chat_name') or jid}\nDziś: {today().isoformat()}\n\n"
                    f"=== OTWARTE ZOBOWIĄZANIA ===\n{listing}\n\n=== ROZMOWA (od najstarszego zobowiązania) ===\n"
                    + "\n".join(lines))
         result = await self.ai.extract(system=SYSTEM, content=content, schema=SCHEMA, model=self.model,
@@ -132,6 +133,21 @@ class CommitmentReconciler:
             counts[status] += 1
         await self.db.mark_commitments_checked([c["id"] for c in items], last_ts)
         return counts
+
+    async def _messages(self, jid: str, since) -> list[dict]:
+        """Later conversation of one item's source: a WhatsApp chat, or an e-mail thread ("gmail:<thread id>")."""
+        if not jid.startswith("gmail:"):
+            return await self.db.get_chat_messages(jid, since=since, limit=MAX_MESSAGES)
+        from src.processing.email_digest import strip_quoted
+
+        rows = await self.db.get_thread_messages(jid[len("gmail:"):], limit=30)
+        out = []
+        for r in rows:
+            if since and r["timestamp"] < since:
+                continue
+            body = strip_quoted(r.get("body") or "")
+            out.append({**r, "body": f"{r.get('title') or ''}: {body}" if body else (r.get("title") or "")})
+        return out
 
     async def _close_done_in_os(self) -> int:
         refs = await self.db.get_open_commitment_os_refs()

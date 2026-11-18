@@ -50,7 +50,7 @@ class ReportContext:
     async def dash(self) -> dict:
         async with self._dash_lock:
             if self._dash is None:
-                client = DashClient()
+                client = await DashClient.from_settings(self.db)
                 if not client.configured:
                     raise RuntimeError("Dash nie jest skonfigurowany (DASH_SUPABASE_SERVICE_KEY)")
                 self._dash = await client.overview(self.today - timedelta(days=1))
@@ -158,6 +158,9 @@ async def build_awaiting(ctx: ReportContext) -> dict:
         if d["needs_reply"] and d["chat_jid"] not in hints:
             hints[d["chat_jid"]] = d.get("reply_hint")
     emails = await ctx.db.get_email_awaiting(days=3, limit=20)
+    threads = await ctx.db.get_email_thread_hints([e["metadata"].get("thread_id") for e in emails if e["metadata"].get("thread_id")])
+    # the AI read of the whole thread knows better than "the other side wrote last" (e.g. "dziękuję, otrzymałem")
+    emails = [e for e in emails if (threads.get(e["metadata"].get("thread_id")) or {}).get("needs_reply", True)]
     return {
         "whatsapp": [
             {
@@ -176,30 +179,54 @@ async def build_awaiting(ctx: ReportContext) -> dict:
                 "od": e.get("sender_display") or e["metadata"].get("sender_name") or e["metadata"].get("from"),
                 "temat": e.get("title"),
                 "czeka_godzin": round(hours_since(e["timestamp"]), 1),
-                "wazny": e.get("priority") == "high",
-                "fragment": (e.get("body") or "")[:400],
+                "wazny": e.get("priority") == "high" or (threads.get(e["metadata"].get("thread_id")) or {}).get("importance") == "high",
+                "czego_oczekuje": (threads.get(e["metadata"].get("thread_id")) or {}).get("reply_hint") or "",
+                "fragment": (e.get("body") or "")[:300],
             }
             for e in emails
         ],
+        "uwaga": "Pominięto rozmowy i maile, na które Dominik odpowiedział innym kanałem albo oznaczył jako obsłużone.",
     }
 
 
+KIND_LABELS = {"decyzja": "decyzja", "zadanie": "do zrobienia", "odpowiedz": "odpowiedź", "czekam": "czekasz na"}
+SOURCE_LABELS = {"whatsapp": "WhatsApp", "gmail": "mail", "manual": "dodane przez Dominika"}
+
+
 async def build_commitments(ctx: ReportContext) -> dict:
-    rows = await ctx.db.list_commitments(status="open", limit=80)
+    rows = await ctx.db.list_commitments(status="open", limit=80, include_snoozed=False)
 
     def view(c):
         return {
             "co": c["title"],
+            "rodzaj": KIND_LABELS.get(c.get("kind") or "", "do zrobienia"),
             "z_kim": c.get("counterpart"),
             "termin": c["due_date"].isoformat() if c.get("due_date") else (c.get("due_hint") or ""),
             "zalegle": bool(c.get("due_date") and c["due_date"] < ctx.today),
-            "zrodlo": f"{c['source']}: {c.get('chat_name') or ''}",
+            "zrodlo": f"{SOURCE_LABELS.get(c['source'], c['source'])}: {c.get('chat_name') or ''}",
             "od": _t(c.get("source_at")),
+            **({"notatka": c["note"]} if c.get("note") else {}),
         }
 
     return {
         "twoje": [view(c) for c in rows if c["direction"] in ("mine", "ask")],
         "czekasz_na": [view(c) for c in rows if c["direction"] == "theirs"],
+    }
+
+
+async def closed_and_notes(ctx: ReportContext) -> dict:
+    """Context every report gets: what was settled in the period and what Dominik told the agents himself."""
+    closed = await ctx.db.resolved_since(ctx.window_start, limit=30)
+    notes = await ctx.db.list_notes(since=ctx.window_start - timedelta(days=7), limit=30)
+    return {
+        "zamkniete_w_okresie": [
+            {"co": c["title"], "z_kim": c.get("counterpart"), "jak": c.get("resolution") or
+             ("zamknięte przez Dominika" if c.get("resolved_by") == "user" else ""),
+             "kiedy": _t(c.get("resolved_at"))}
+            for c in closed
+        ],
+        "notatki_dominika": [{"kiedy": _t(n["created_at"]), "tresc": n["text"], **({"dotyczy": n["about"]} if n.get("about") else {})}
+                             for n in notes],
     }
 
 

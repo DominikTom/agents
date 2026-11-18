@@ -18,14 +18,38 @@ from src.connectors.supabase_rest import SupabaseREST
 logger = logging.getLogger(__name__)
 
 DEFAULT_URL = "https://sebckrbvoghfdrppdxyt.supabase.co"
-# Shops that are real sales channels (warehouse also has 'unknown'/'manual')
-MAIN_SHOPS = ["mybed.pl", "mybed.de", "mittohome.pl"]
-# Meta ad account → shop (same mapping as the dash app, src/lib/meta-ads.ts)
+# Shops = real sales channels, keyed by the order number the ERP gives them (panel zamówień, docs/plan-import-api-sklepow):
+# Shoper…-1 mybed.pl, Shoper…-2 mybed.de, Shoper…-3 mojepostel.cz (MyBed CZ), Shopify… mittohome.pl, NOMO-… nomosleep.pl.
+# A brand is never the company that invoices it (Delta Industries, All Good Things, MittoHome) — reports speak in shops/brands.
+SHOPS = [
+    {"shop": "mybed.pl", "brand": "MyBed", "label": "mybed.pl"},
+    {"shop": "mybed.de", "brand": "MyBed", "label": "mybed.de"},
+    {"shop": "mojepostel.cz", "brand": "MyBed", "label": "mojepostel.cz"},
+    {"shop": "mittohome.pl", "brand": "MittoHome", "label": "MittoHome"},
+    {"shop": "nomosleep.pl", "brand": "NOMO", "label": "NOMO"},
+]
+MAIN_SHOPS = [s["shop"] for s in SHOPS]
+SHOP_BRAND = {s["shop"]: s["brand"] for s in SHOPS}
+SHOP_LABEL = {s["shop"]: s["label"] for s in SHOPS}
+# The dash names Shoper store -3 "shoper_unknown" (it only knows -1/-2); NOMO test orders land in "unknown"
+SHOP_ALIASES = {"shoper_unknown": "mojepostel.cz"}
+# Meta ad account → shop (dash app src/lib/meta-ads.ts + accounts added later). Overridable in the panel / MCP
+# (settings "ad_accounts"); an account missing here is reported as unassigned, never silently mixed into another shop.
 META_ACCOUNT_SHOP = {
     "act_1681802382204753": "mybed.pl",
     "act_637792865917248": "mybed.de",
     "act_797212915921530": "mittohome.pl",
+    # since 09.2026, campaigns "TGRS_…" (mattresses, blog, showrooms) — NOMO; confirm in the panel if this changes
+    "act_1376753327967692": "nomosleep.pl",
 }
+UNASSIGNED = "nieprzypisane"
+# Revenue basis: "gross" = every order the ERP has (as the dash app; unpaid offers and cancellations included);
+# "paid" = paid orders only (revenue_paid_pln / orders_paid). Default stays "gross": bank transfers are booked days
+# later, so "paid" makes yesterday look ~15% weaker than older days and skews every day-over-day comparison.
+# The paid amount is always shown next to it. Switch in settings general.revenue_basis (panel / MCP).
+DEFAULT_REVENUE_BASIS = "gross"
+# A shop counts as "selling every day" (ERP fallback marks it unknown when missing) above this many orders a week
+USUAL_WEEKLY_ORDERS = 21
 # Google Ads cost comes from GA4 (fact_daily_traffic, source='__total__'), in the
 # property currency: mybed.de reports in EUR, the Polish shops in PLN.
 GA4_EUR_HOSTS = {"mybed.de"}
@@ -33,11 +57,24 @@ PLATFORM_LABELS = {"meta": "Meta", "google": "Google Ads"}
 
 
 class DashClient:
-    def __init__(self):
+    def __init__(self, account_map: dict | None = None, revenue_basis: str | None = None):
         self.rest = SupabaseREST(
             get_env_optional("DASH_SUPABASE_URL") or DEFAULT_URL,
             get_env_optional("DASH_SUPABASE_SERVICE_KEY"),
         )
+        self.account_map = {**META_ACCOUNT_SHOP, **(account_map or {})}
+        self.revenue_basis = revenue_basis if revenue_basis in ("paid", "gross") else DEFAULT_REVENUE_BASIS
+
+    @classmethod
+    async def from_settings(cls, db) -> "DashClient":
+        """Client with the ad-account mapping and revenue basis saved in the panel / via MCP."""
+        accounts, general = {}, {}
+        try:
+            accounts = await db.get_setting("ad_accounts", {}) or {}
+            general = await db.get_setting("general", {}) or {}
+        except Exception as e:  # settings are an override — never block the numbers
+            logger.debug(f"dash settings unavailable: {e}")
+        return cls({k: v for k, v in accounts.items() if isinstance(v, str) and v}, general.get("revenue_basis"))
 
     @property
     def configured(self) -> bool:
@@ -115,6 +152,7 @@ class DashClient:
         rev, meta, google, rooms = got["rev"], got["meta"], got["google"], got["rooms"]
         if isinstance(rev, Exception):
             raise rev
+        rev = alias_shops(rev)
         for name, res in (("Meta", meta), ("Google (GA4)", google), ("showroomy", rooms)):
             if isinstance(res, Exception):
                 logger.warning(f"dash: {name} unavailable: {res}")
@@ -123,6 +161,7 @@ class DashClient:
             [] if isinstance(meta, Exception) else meta,
             [] if isinstance(google, Exception) else google,
             rev,
+            account_map=self.account_map,
         )
         # A source with nothing for `ref` is late (ETL not run yet) or failed — show "no data", never "0 zł, −100%"
         ref_iso = ref.isoformat()
@@ -142,7 +181,8 @@ class DashClient:
                 missing.discard("sales")
                 sales_source, unknown_shops = "IdeaERP", erp["unknown_shops"]
         return build_overview(rev, ads, [] if isinstance(rooms, Exception) else rooms, ref, missing=missing,
-                              failed=failed, sales_source=sales_source, unknown_shops=unknown_shops)
+                              failed=failed, sales_source=sales_source, unknown_shops=unknown_shops,
+                              basis=self.revenue_basis)
 
     async def _erp_sales(self, ref: date, rev: list[dict]) -> dict | None:
         """Yesterday's sales straight from IdeaERP while the dash has not loaded them yet. A main shop the ERP
@@ -160,8 +200,10 @@ class DashClient:
             return None
         got = {r["source_shop"] for r in erp["rows"] if r["orders_count"]}
         week = [(ref - timedelta(days=i)).isoformat() for i in range(1, 8)]
+        # small shops (NOMO, mojepostel.cz) often have a day without orders — that is not a gap in the ERP
         usual = {s for s in MAIN_SHOPS
-                 if sum(int(r.get("orders_count") or 0) for r in rev if r.get("source_shop") == s and r.get("date") in week) >= 7}
+                 if sum(int(r.get("orders_count") or 0) for r in rev
+                        if r.get("source_shop") == s and r.get("date") in week) >= USUAL_WEEKLY_ORDERS}
         unknown = usual - got
         if unknown:
             logger.info(f"IdeaERP fallback {ref}: no orders for {sorted(unknown)} (ERP shops: {erp['shops']}, "
@@ -180,8 +222,27 @@ def _pct(a: float, b: float) -> float | None:
     return round((a - b) / b * 100, 1) if b else None
 
 
-def normalize_spend(meta: list[dict], google: list[dict], revenue: list[dict]) -> list[dict]:
-    """One list of {date, shop, platform, spend} in PLN for Meta + Google Ads."""
+def alias_shops(rows: list[dict]) -> list[dict]:
+    """Warehouse shop names → our shop keys (Shoper store -3 = mojepostel.cz). Rows of the same day and shop are summed."""
+    out: dict[tuple, dict] = {}
+    for r in rows:
+        shop = SHOP_ALIASES.get(r.get("source_shop"), r.get("source_shop"))
+        key = (r.get("date"), shop)
+        if key not in out:
+            out[key] = {**r, "source_shop": shop}
+            continue
+        acc = out[key]
+        for k in ("orders_count", "orders_paid", "orders_cancelled", "revenue_gross_pln", "revenue_paid_pln",
+                  "revenue_gross_original"):
+            acc[k] = _f(acc.get(k)) + _f(r.get(k))
+    return list(out.values())
+
+
+def normalize_spend(meta: list[dict], google: list[dict], revenue: list[dict],
+                    account_map: dict | None = None) -> list[dict]:
+    """One list of {date, shop, platform, spend[, account]} in PLN for Meta + Google Ads. A Meta account that is not
+    mapped to a shop goes to UNASSIGNED with its id, so the report can say which account it is."""
+    accounts = account_map if account_map is not None else META_ACCOUNT_SHOP
     # EUR→PLN per day: from Meta DE rows (spend is PLN, spend_original EUR), else from DE revenue
     rate: dict[str, float] = {}
     for r in revenue:
@@ -194,12 +255,16 @@ def normalize_spend(meta: list[dict], google: list[dict], revenue: list[dict]) -
 
     out = []
     for a in meta:
-        out.append({
+        account = a.get("account_id") or ""
+        row = {
             "date": a["date"],
-            "shop": META_ACCOUNT_SHOP.get(a.get("account_id") or "", "inne"),
+            "shop": accounts.get(account, UNASSIGNED),
             "platform": a.get("platform") or "meta",
             "spend": _f(a.get("spend")),
-        })
+        }
+        if row["shop"] == UNASSIGNED:
+            row["account"] = account or "?"
+        out.append(row)
     for g in google:
         cost = _f(g.get("ad_cost"))
         if not cost:
@@ -221,9 +286,12 @@ MISSING_METRICS = {
 
 def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref: date,
                    missing: set[str] | None = None, failed: set[str] | None = None,
-                   sales_source: str | None = None, unknown_shops: set[str] | None = None) -> dict:
+                   sales_source: str | None = None, unknown_shops: set[str] | None = None,
+                   basis: str = "gross") -> dict:
     """missing: no rows for `ref` (late) — the day is unknown. failed: the source did not answer at all —
-    every period is unknown (never shown as 0 zł)."""
+    every period is unknown (never shown as 0 zł). basis: "paid" counts paid orders only (no unpaid offers,
+    no cancellations), "gross" everything the ERP has."""
+    rev_key, orders_key = ("revenue_paid_pln", "orders_paid") if basis == "paid" else ("revenue_gross_pln", "orders_count")
     failed = set(failed or ())
     missing = set(missing or ()) | failed
     unknown = set().union(*(MISSING_METRICS[m] for m in missing)) if missing else set()
@@ -239,29 +307,33 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
         ds = d.isoformat()
         rows = [v for (dd, s), v in by_day_shop.items() if dd == ds and (shops is None or s in shops)]
         return {
-            "orders": sum(int(r.get("orders_count") or 0) for r in rows),
-            "revenue": round(sum(_f(r.get("revenue_gross_pln")) for r in rows), 2),
+            "orders": sum(int(_f(r.get(orders_key))) for r in rows),
+            "revenue": round(sum(_f(r.get(rev_key)) for r in rows), 2),
             "paid": round(sum(_f(r.get("revenue_paid_pln")) for r in rows), 2),
+            "gross": round(sum(_f(r.get("revenue_gross_pln")) for r in rows), 2),
         }
 
     def range_total(start: date, end: date) -> dict:
-        tot = {"orders": 0, "revenue": 0.0, "paid": 0.0}
+        tot = {"orders": 0, "revenue": 0.0, "paid": 0.0, "gross": 0.0}
         d = start
         while d <= end:
             t = day_total(d)
             for k in tot:
                 tot[k] += t[k]
             d += timedelta(days=1)
-        tot["revenue"] = round(tot["revenue"], 2)
-        tot["paid"] = round(tot["paid"], 2)
+        for k in ("revenue", "paid", "gross"):
+            tot[k] = round(tot[k], 2)
         return tot
 
     spend_by_day: dict[str, float] = defaultdict(float)
     # (shop, platform) -> date -> spend
     spend_cell: dict[tuple[str, str], dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    unassigned: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     for a in ads:
         spend_by_day[a["date"]] += a["spend"]
         spend_cell[(a["shop"], a["platform"])][a["date"]] += a["spend"]
+        if a["shop"] == UNASSIGNED:
+            unassigned[a.get("account") or "?"][a["date"]] += a["spend"]
 
     def spend_range(start: date, end: date) -> float:
         total, d = 0.0, start
@@ -286,15 +358,22 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
         cur = by_day_shop.get((ref.isoformat(), shop)) or {}
         before = by_day_shop.get((prev.isoformat(), shop)) or {}
         last_week = by_day_shop.get((same_wd.isoformat(), shop)) or {}
+        orders = int(_f(cur.get(orders_key)))
+        revenue = round(_f(cur.get(rev_key)), 2)
+        unpaid = round(_f(cur.get("revenue_gross_pln")) - _f(cur.get("revenue_paid_pln")), 2)
         shops.append({
             "shop": shop,
-            "orders": int(cur.get("orders_count") or 0),
-            "revenue_pln": round(_f(cur.get("revenue_gross_pln")), 2),
+            "brand": SHOP_BRAND.get(shop),
+            "orders": orders,
+            "revenue_pln": revenue,
             "revenue_original": round(_f(cur.get("revenue_gross_original")), 2),
             "currency": cur.get("original_currency") or ("EUR" if shop.endswith(".de") else "PLN"),
-            "aov_pln": round(_f(cur.get("avg_order_value_pln")), 2),
-            "vs_prev_day_pct": _pct(_f(cur.get("revenue_gross_pln")), _f(before.get("revenue_gross_pln"))),
-            "vs_same_weekday_pct": _pct(_f(cur.get("revenue_gross_pln")), _f(last_week.get("revenue_gross_pln"))),
+            "aov_pln": round(revenue / orders, 2) if orders else 0.0,
+            "vs_prev_day_pct": _pct(_f(cur.get(rev_key)), _f(before.get(rev_key))),
+            "vs_same_weekday_pct": _pct(_f(cur.get(rev_key)), _f(last_week.get(rev_key))),
+            "oplacone_pln": round(_f(cur.get("revenue_paid_pln")), 2),
+            # unpaid offers (often paid a few days later) + cancellations = gross minus paid
+            **({"nieoplacone_i_anulowane_pln": unpaid} if unpaid > 0 else {}),
         })
 
     wk_start = week_start(ref)
@@ -310,15 +389,15 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
     platforms = sorted({p for (_, p) in spend_cell})
     by_shop = []
     for shop in MAIN_SHOPS + sorted({sh for (sh, _) in spend_cell} - set(MAIN_SHOPS)):
-        row = {"shop": shop}
+        row = {"shop": shop, **({"marka": SHOP_BRAND[shop]} if shop in SHOP_BRAND else {})}
         for p in platforms:
             label = PLATFORM_LABELS.get(p, p)
             row[label] = {
                 "dzien": cell_range((shop, p), ref, ref),
                 "7_dni": cell_range((shop, p), ref - timedelta(days=6), ref),
             }
-        row["suma_dzien"] = round(sum(v["dzien"] for k, v in row.items() if isinstance(v, dict)), 2)
-        row["suma_7_dni"] = round(sum(v["7_dni"] for k, v in row.items() if isinstance(v, dict)), 2)
+        row["suma_dzien"] = round(sum(v["dzien"] for v in row.values() if isinstance(v, dict)), 2)
+        row["suma_7_dni"] = round(sum(v["7_dni"] for v in row.values() if isinstance(v, dict)), 2)
         shop_prev7 = sum(cell_range((shop, p), ref - timedelta(days=13), ref - timedelta(days=7)) for p in platforms)
         row["suma_7_dni_vs_poprz_pct"] = _pct(row["suma_7_dni"], shop_prev7)
         if row["suma_7_dni"] or shop in MAIN_SHOPS:
@@ -370,6 +449,22 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
         series.append({"date": d.isoformat(), "revenue": t["revenue"], "orders": t["orders"],
                        "spend": round(spend_by_day.get(d.isoformat(), 0.0), 2)})
         d += timedelta(days=1)
+
+    by_brand = []
+    for brand in dict.fromkeys(SHOP_BRAND.values()):
+        shops_of = [r for r in by_shop if r.get("marka") == brand]
+        by_brand.append({
+            "marka": brand,
+            "sklepy": [r["shop"] for r in shops_of],
+            "suma_dzien": round(sum(r["suma_dzien"] or 0 for r in shops_of), 2),
+            "suma_7_dni": round(sum(r["suma_7_dni"] or 0 for r in shops_of), 2),
+        })
+    unassigned_rows = [
+        {"konto": acc, "dzien": round(days.get(ref.isoformat(), 0.0), 2),
+         "7_dni": round(sum(v for d, v in days.items() if (ref - timedelta(days=6)).isoformat() <= d <= ref.isoformat()), 2)}
+        for acc, days in sorted(unassigned.items())
+    ]
+    unassigned_rows = [u for u in unassigned_rows if u["7_dni"]]
 
     room_rows: dict[str, dict] = defaultdict(lambda: {"orders_7d": 0, "revenue_7d": 0.0, "revenue_day": 0.0})
     for r in rooms:
@@ -429,8 +524,16 @@ def build_overview(revenue: list[dict], ads: list[dict], rooms: list[dict], ref:
             "per_sklep": _without_platforms(by_shop, {PLATFORM_LABELS.get(f, f) for f in failed}),
             "per_platforma": [r for r in by_platform
                               if r["platforma"] not in {PLATFORM_LABELS.get(f, f) for f in failed}],
-            "zrodla": "Meta: konta reklamowe per sklep (dash). Google Ads: koszt z GA4 per domena, mybed.de przeliczone z EUR na PLN.",
+            "per_marka": by_brand if not failed else [],
+            **({"nieprzypisane_konta": unassigned_rows} if unassigned_rows else {}),
+            "zrodla": "Meta: konta reklamowe per sklep (dash). Google Ads: koszt z GA4 per domena, mybed.de przeliczone "
+                      "z EUR na PLN. Marka = sklep (MyBed: mybed.pl, mybed.de, mojepostel.cz; MittoHome; NOMO), nie spółka.",
         },
+        "revenue_basis": basis,
+        "revenue_note": ("Przychód = tylko zamówienia opłacone (bez nieopłaconych ofert i anulowanych); ostatnie dni "
+                         "rosną jeszcze, gdy schodzą przelewy" if basis == "paid" else
+                         "Przychód = wszystkie zamówienia złożone w ERP (także nieopłacone oferty i anulowane); "
+                         "kwota opłacona jest obok (oplacone_pln)"),
         "showrooms": [
             {"showroom": k, "orders_7d": v["orders_7d"], "revenue_7d": round(v["revenue_7d"], 2),
              "revenue_day": round(v["revenue_day"], 2)}

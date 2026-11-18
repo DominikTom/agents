@@ -65,8 +65,8 @@ async def os_snapshot():
     return await cached("os", 300, load)
 
 
-async def dash_overview():
-    client = DashClient()
+async def dash_overview(db: Database | None = None):
+    client = await DashClient.from_settings(db) if db is not None else DashClient()
     if not client.configured:
         return None
 
@@ -142,7 +142,7 @@ async def pulpit(db: Database) -> dict:
     bridge, os_snap, dash, wa_wait, mail_wait, cal, commitments, digests, briefing, wrap = await asyncio.gather(
         bridge_status(db),
         os_snapshot(),
-        dash_overview(),
+        dash_overview(db),
         db.get_whatsapp_awaiting(days=5, limit=8),
         db.get_email_awaiting(days=3, limit=8),
         db.get_calendar_events(start, end),

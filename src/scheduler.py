@@ -26,6 +26,7 @@ DEFAULT_CRONS = {
     "topic_extraction": "40 15 * * mon-fri",
     "slack_sync": "*/10 * * * *",
     "team_updates": "50 8,12,16,17,18,19 * * mon-fri",
+    "live_refresh": "*/15 7-20 * * mon-sat",
 }
 
 

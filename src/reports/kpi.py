@@ -16,7 +16,10 @@ MONEY = {"revenue", "aov", "spend_total", "spend_meta", "spend_google"}
 SPEND = {"spend_total", "spend_meta", "spend_google"}
 # Headline cards (first period, "Razem"): at most four, in this order of preference
 HEADLINE_ORDER = ["revenue", "orders", "aov", "spend_total", "spend_google", "spend_meta"]
-SHOP_LABELS = {"Razem": "Razem", "mybed.pl": "mybed.pl", "mybed.de": "mybed.de", "mittohome.pl": "MittoHome"}
+SHOP_LABELS = {"Razem": "Razem", "mybed.pl": "mybed.pl", "mybed.de": "mybed.de", "mittohome.pl": "MittoHome",
+               "nomosleep.pl": "NOMO", "mojepostel.cz": "mojepostel.cz"}
+# columns of the per-shop table (Razem + these); smaller shops count in "Razem" only
+TABLE_SHOPS = {"Razem", "mybed.pl", "mybed.de", "mittohome.pl", "nomosleep.pl"}
 
 
 # ─── Formatting ──────────────────────────────────────────────────────────────
@@ -65,7 +68,7 @@ def kpi_data(overview: dict, cfg: dict) -> dict | None:
     out_periods = []
     for p in periods:
         per = available[p]
-        rows = per["rows"] if per_shop else per["rows"][:1]
+        rows = [r for r in per["rows"] if r["shop"] in TABLE_SHOPS] if per_shop else per["rows"][:1]
         out_periods.append({
             "key": p,
             "label": KPI_PERIODS[p],

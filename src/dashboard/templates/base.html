@@ -95,7 +95,7 @@
 {# ── Bottom navigation (mobile) ── #}
 <nav class="pb-safe fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface/95 backdrop-blur-md lg:hidden">
   <div class="grid grid-cols-5">
-    {% for href, label, ic, key in [("/", "Pulpit", "layout-dashboard", "pulpit"), ("/reports", "Raporty", "file-text", "reports"), ("/chats", "Rozmowy", "message-circle", "chats"), ("/commitments", "Zadania", "square-check", "commitments"), ("/sources", "Źródła", "plug", "sources")] %}
+    {% for href, label, ic, key in [("/dzis", "Dziś", "list-checks", "today"), ("/", "Pulpit", "layout-dashboard", "pulpit"), ("/reports", "Raporty", "file-text", "reports"), ("/chats", "Rozmowy", "message-circle", "chats"), ("/commitments", "Zadania", "square-check", "commitments")] %}
     <a href="{{ href }}" class="flex min-h-[3.5rem] flex-col items-center justify-center gap-0.5 text-[11px] font-medium {{ 'text-primary' if active == key else 'text-ink-muted' }}">
       {{ icon(ic, "h-5 w-5") }}<span>{{ label }}</span>
     </a>
