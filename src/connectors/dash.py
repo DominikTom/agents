@@ -41,7 +41,7 @@ META_ACCOUNT_SHOP = {
     "act_1681802382204753": "mybed.pl",
     "act_637792865917248": "mybed.de",
     "act_797212915921530": "mittohome.pl",
-    # since 09.2026, campaigns "TGRS_…" (mattresses, blog, showrooms) — NOMO; confirm in the panel if this changes
+    # NOMO (confirmed by Dominik 18.11.2026) — since 09.2026, campaigns "TGRS_…" (mattresses, blog, showrooms)
     "act_1376753327967692": "nomosleep.pl",
 }
 UNASSIGNED = "nieprzypisane"
