@@ -922,3 +922,19 @@ def test_finance_section_is_registered_everywhere():
     merged = merge_profiles({"morning_briefing": {"sections": [{"key": "top", "enabled": True}]}})
     fin = [sec for sec in merged["morning_briefing"]["sections"] if sec["key"] == "finance"]
     assert fin and fin[0]["enabled"] is False
+
+
+def test_cfo_tools_registered_in_mcp():
+    from src.mcp_server import cfo_tools
+
+    names: list[str] = []
+
+    class FakeMCP:
+        def tool(self):
+            def deco(fn):
+                names.append(fn.__name__)
+                return fn
+            return deco
+
+    cfo_tools.register(FakeMCP())
+    assert {"cfo_overview", "cfo_invoices", "cfo_producer_check", "cfo_tools", "cfo_call", "cfo_sql"} <= set(names)
