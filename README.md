@@ -9,9 +9,10 @@ AI chief of staff dla CEO MyBed Group. Czyta WhatsApp, Gmail, kalendarz, MyBed G
 - **Zobowiązania**: co obiecałeś, o co Cię proszono i co inni obiecali Tobie. Po zatwierdzeniu trafiają do MyBed OS jako prywatne zadanie.
 - **Pulpit**: KPI sprzedaży, rozmowy i maile czekające na odpowiedź, kalendarz, zadania z OS.
 - **Raporty dnia zespołu** (Zespół): źródłem jest **MyBed OS → Daily Update** (kolekcja `dailyUpdates`). Analizę AI i zmiany w zadaniach robi OS, a zatwierdza sam autor raportu. Agenci tylko czytają: pokazują raport, zmiany w OS, braki raportu (lista uczestników Daily Update, dni robocze ze świętami, od 10:00 następnego dnia roboczego) i eskalacje (prośby bez reakcji, zadania „czekam” w 3 raportach z rzędu, seria dni bez raportu, stare blokery z raportów). Okres przejściowy: dla osób bez raportu w OS liczy się jeszcze Slack (AI czyta kanały daily). Dzień przełączenia na „tylko OS” ustawiasz na stronie Zespół. Kontrakt danych: repo OS, `docs/DAILY_REPORTS_FOR_AGENTS.md`.
+- **Finanse (CFO Studio)**: karta „Finanse” na Pulpicie (wynik realny ostatniego zamkniętego miesiąca vs księgi Incro, marża I 3M, prognoza bieżącego miesiąca, koszt zamówień w produkcji, alerty CFO), sekcja „Finanse (CFO Studio)” w raportach (włączasz w Studio) i narzędzia `cfo_*` w MCP — w Claude wystarcza jeden konektor (Agents). Liczby i logika zostają w CFO Studio (mybed-cfo-studio.vercel.app); Agents czyta je przez serwer MCP CFO Studio kluczem API (`CFO_STUDIO_API_KEY`). Tylko Delta Industries (MyBed) — bez MittoHome i NOMO.
 - **Liczby w raportach**: tabela KPI (okresy 1/3/7/30 dni, sklepy, Meta i Google Ads, zmiana % do poprzedniego okresu) liczona kodem z hurtowni dash, nie przez AI. Okresy i wskaźniki wybierasz w Studio.
 - **Skąd dane**: strona w panelu, która pokazuje dla każdego źródła, co czytamy, jak często i które sekcje raportów z niego korzystają.
-- **Serwer MCP** dla Claude.ai: pytania do całej bazy wiedzy z czatu **i zmiany z czatu** — „co mam dziś” (`today_view`), dodaj / zamknij / odłóż sprawę (`add_item`, `close_item`, `update_item`), „umowa Eli podpisana” (`add_note` — notatka sama zamyka pasujące sprawy i jest rozstrzygająca dla raportów), „odpisałem mu” (`mark_handled`), ustawienia raportów (`get_report_settings`, `update_report_settings`, `run_report`), reklamy per marka (`get_marketing`), przypisanie konta reklamowego (`set_ad_account`), stan danych (`get_data_health`). Połączenie wymaga logowania i zgody w panelu.
+- **Serwer MCP** dla Claude.ai: pytania do całej bazy wiedzy z czatu **i zmiany z czatu** — „co mam dziś” (`today_view`), dodaj / zamknij / odłóż sprawę (`add_item`, `close_item`, `update_item`), „umowa Eli podpisana” (`add_note` — notatka sama zamyka pasujące sprawy i jest rozstrzygająca dla raportów), „odpisałem mu” (`mark_handled`), ustawienia raportów (`get_report_settings`, `update_report_settings`, `run_report`), reklamy per marka (`get_marketing`), przypisanie konta reklamowego (`set_ad_account`), stan danych (`get_data_health`), finanse Delty z CFO Studio (`cfo_overview`, `cfo_guide`, `cfo_list_datasets`, `cfo_get_dataset`, `cfo_forecast`, `cfo_order`, `cfo_invoices`, `cfo_describe`, `cfo_sql`). Połączenie wymaga logowania i zgody w panelu.
 - **Marki i sklepy**: MyBed = mybed.pl, mybed.de, mojepostel.cz (Shoper -1/-2/-3); MittoHome = mittohome.pl; NOMO = nomosleep.pl. Spółki (Delta Industries, All Good Things) nigdy nie są traktowane jak sklep — sklep bierzemy z numeru zamówienia. Konta Meta → sklep: `src/connectors/dash.py` (`META_ACCOUNT_SHOP`) + własne przypisania z MCP (`set_ad_account`); konto bez przypisania raport pokazuje osobno.
 
 Wygląd: design system MyBed Group OS (`pipeline/docs/DESIGN.md`) — Geist, indygo + cyjan, gęsty panel, jasny/ciemny motyw, mobile.
@@ -23,6 +24,7 @@ whatsapp-bridge (Node, Baileys) ──► scheduler (Python) ──► Postgres 
 Gmail / Calendar (Google API) ───►      │                        ▲
 MyBed OS (Supabase os_entities) ◄──────┤                        │
 dash (Supabase fact_daily_*) ──────────┘            agents (FastAPI: panel + MCP) ◄── Caddy (HTTPS)
+CFO Studio (MCP /api/mcp, klucz API) ──────────────────────►  karta Finanse, sekcja raportów, narzędzia cfo_*
 ```
 
 | Kontener | Co robi |
@@ -51,6 +53,7 @@ Potem w panelu: **Źródła → WhatsApp** → zeskanuj kod QR (albo „Połącz
 | `OS_SUPABASE_SERVICE_KEY` | Supabase → projekt **mybed-group-os** → Settings → API keys → secret (service_role) |
 | `DASH_SUPABASE_SERVICE_KEY` | Supabase → projekt z hurtownią (dash) → Settings → API keys → secret |
 | `PANEL_SUPABASE_SERVICE_KEY` | Supabase (organizacja Mybed2) → projekt **panel-zamowien** → Settings → API keys → secret. Dzisiejsza sprzedaż na żywo z API sklepów (co 10 min). Agenci tylko czytają `sklep_zamowienia` (pola zamówienia, bez klientów) i `sklepy`. Sprawdzenie po wdrożeniu: `python -m src.main panel-check` |
+| `CFO_STUDIO_API_KEY` | CFO Studio → **MCP / czat** → **Klucze API dla aplikacji** → Utwórz klucz (`cfk_…`, widoczny raz; zakres pełny albo „bez danych bankowych i SQL”). Opcjonalnie `CFO_STUDIO_URL` (domyślnie `https://mybed-cfo-studio.vercel.app`). Bez klucza karta i sekcja Finanse się nie pokazują |
 | `RESEND_API_KEY`, `EMAIL_FROM` | to samo konto Resend co w MyBed OS (albo `SMTP_*`) |
 | `PUBLIC_BASE_URL` | `https://agents.mybed.pl` — linki w mailach |
 | `DASHBOARD_PASSWORD` | wymagane, nie ma już domyślnego `admin/admin` |

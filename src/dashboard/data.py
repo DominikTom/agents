@@ -9,6 +9,7 @@ from datetime import timedelta
 
 from src.common.config import get_env_optional
 from src.common.timeutil import day_range, now, today
+from src.connectors.cfo_studio import CFOStudioClient
 from src.connectors.dash import DashClient
 from src.connectors.os_mybed import OSClient
 from src.connectors.whatsapp_bridge import BridgeClient, BridgeError
@@ -79,6 +80,14 @@ async def dash_overview(db: Database | None = None):
     return await cached("dash", 600, load)
 
 
+async def cfo_finance() -> dict | None:
+    """Finances of Delta from CFO Studio (real result, Margin I, forecast, production) — None when no API key is set."""
+    client = CFOStudioClient()
+    if not client.configured:
+        return None
+    return await cached("cfo", 600, client.summary)
+
+
 async def erp_yesterday(db: Database) -> dict | None:
     """Fallback KPIs from IdeaERP metrics when dash isn't configured."""
     y = today() - timedelta(days=1)
@@ -101,6 +110,7 @@ def config_status() -> dict:
         "slack": bool(get_env_optional("SLACK_BOT_TOKEN")),
         "ideaerp": bool(get_env_optional("IDEAERP_API_TOKEN")),
         "mcp_key": bool(get_env_optional("MCP_API_KEY")),
+        "cfo_studio": CFOStudioClient().configured,
     }
 
 
@@ -139,10 +149,11 @@ async def sources_health(db: Database) -> list[dict]:
 async def pulpit(db: Database) -> dict:
     t = today()
     start, end = day_range(t)
-    bridge, os_snap, dash, wa_wait, mail_wait, cal, commitments, digests, briefing, wrap = await asyncio.gather(
+    bridge, os_snap, dash, cfo, wa_wait, mail_wait, cal, commitments, digests, briefing, wrap = await asyncio.gather(
         bridge_status(db),
         os_snapshot(),
         dash_overview(db),
+        cfo_finance(),
         db.get_whatsapp_awaiting(days=5, limit=8),
         db.get_email_awaiting(days=3, limit=8),
         db.get_calendar_events(start, end),
@@ -162,6 +173,7 @@ async def pulpit(db: Database) -> dict:
         "os_my": os_snap.my_tasks() if os_snap else None,
         "os_blockers": os_snap.blockers()[:4] if os_snap else [],
         "dash": dash,
+        "cfo": cfo,
         "erp": None if dash else await erp_yesterday(db),
         "wa_wait": wa_wait,
         "mail_wait": mail_wait,

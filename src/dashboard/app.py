@@ -665,9 +665,9 @@ async def sources_page(request: Request):
     health, bridge = await asyncio.gather(data.sources_health(db), data.bridge_status())
     runs = await db.get_last_run_any(["os_people_sync", "ideaerp_sync", "chat_digests", "topic_extraction"])
     os_snap = await data.os_snapshot()
+    dash, cfo = await asyncio.gather(data.dash_overview(db), data.cfo_finance())
     return render(request, "sources.html", "sources", health=health, bridge=bridge, config=data.config_status(),
-                  runs=runs, os_counts=os_snap.summary_counts() if os_snap else None,
-                  dash=await data.dash_overview(db))
+                  runs=runs, os_counts=os_snap.summary_counts() if os_snap else None, dash=dash, cfo=cfo)
 
 
 @app.get("/sources/whatsapp", response_class=HTMLResponse)

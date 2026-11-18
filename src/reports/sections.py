@@ -132,6 +132,16 @@ async def build_marketing(ctx: ReportContext) -> dict:
     return {"dzien": d["date"], **d["marketing"]}
 
 
+async def build_finance(ctx: ReportContext) -> dict:
+    """Delta's finances from CFO Studio (real result vs Incro, Margin I 3M, forecast, production, alerts)."""
+    from src.connectors.cfo_studio import CFOStudioClient
+
+    s = await CFOStudioClient().summary()
+    if not s.get("ok"):
+        raise RuntimeError(s.get("error") or "CFO Studio niedostępny")
+    return {k: v for k, v in s.items() if k not in ("ok", "url")}
+
+
 async def build_showrooms(ctx: ReportContext) -> list:
     d = await ctx.dash()
     return d["showrooms"]
@@ -480,6 +490,7 @@ async def build_slack(ctx: ReportContext) -> list:
 BUILDERS = {
     "sales": build_sales,
     "marketing": build_marketing,
+    "finance": build_finance,
     "showrooms": build_showrooms,
     "calendar": build_calendar,
     "awaiting": build_awaiting,

@@ -99,6 +99,21 @@ SOURCES: dict[str, dict] = {
         "job": None,
         "health": None,
     },
+    "cfo_studio": {
+        "label": "CFO Studio (finanse Delty)",
+        "icon": "chart-line",
+        "what": "Finanse spółki Delta Industries (MyBed): wynik realny zamkniętych miesięcy vs księgi Incro, marża I, prognoza "
+                "bieżącego miesiąca, przychód MTD, koszt zamówień w produkcji, alerty CFO; w MCP także zestawy danych, "
+                "zamówienia, faktury z Fakturowni i zapytania SQL. Bez MittoHome i NOMO (All Good Things).",
+        "how": "Serwer MCP CFO Studio (mybed-cfo-studio.vercel.app/api/mcp) z kluczem API aplikacji (CFO_STUDIO_API_KEY w .env). "
+               "Logika i uprawnienia zostają w CFO Studio — klucz „bez danych bankowych” nie widzi wyciągów ani SQL.",
+        "cadence": "przy otwarciu Pulpitu (pamięć 10 min), przy raporcie i w MCP",
+        "processing": "Karta „Finanse” na Pulpicie, sekcja „Finanse (CFO Studio)” w raportach (włączasz w Studio), "
+                      "narzędzia cfo_* w MCP Agentów. Wynik realny = księgi Incro z kosztem produkcji wg cennika zamiast "
+                      "faktur producentów i transportem z kalkulatora panelu.",
+        "job": None,
+        "health": None,
+    },
     "ideaerp": {
         "label": "IdeaERP",
         "icon": "store",
@@ -130,6 +145,7 @@ SECTION_SOURCES: dict[str, list[str]] = {
     "sales": ["dash", "panel", "ideaerp"],
     "marketing": ["dash", "ga4"],
     "showrooms": ["dash"],
+    "finance": ["cfo_studio"],
     "calendar": ["calendar"],
     "awaiting": ["whatsapp", "gmail"],
     "commitments": ["whatsapp", "gmail"],
