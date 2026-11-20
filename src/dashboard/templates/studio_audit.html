@@ -38,6 +38,13 @@
         do tygodnia i komentarz AI. Jeśli dzisiejszego przebiegu audytu nie ma, księgowość nie dostaje nic, a Ty krótką
         informację z godziną ostatniego przebiegu. Każdy przebieg wysyłamy tylko raz.
       </p>
+      <label class="flex items-start gap-3 border-t border-line pt-4">
+        <input type="checkbox" name="doc_reminders" class="peer sr-only" {{ 'checked' if settings.doc_reminders }}>
+        <span class="toggle mt-0.5"></span>
+        <span class="text-sm text-ink-soft"><b>Przypomnienia o brakujących dokumentach</b> (wtorek–piątek, 7:00)
+          <span class="mt-1 block text-xs text-ink-muted">Wyciągi i listy płac, których brakuje w CFO Studio, z linkiem do folderu. W poniedziałek są na górze maila audytowego. Gdy niczego nie brakuje, nic nie wychodzi; prośba znika sama, gdy dokument trafi do CFO Studio.{% if doc_state.date %} Ostatnie: {{ doc_state.at }} ({{ doc_state.count }} poz.).{% endif %}</span>
+        </span>
+      </label>
     </section>
 
     <section class="card p-5 space-y-4">
@@ -82,12 +89,19 @@
               data-confirm="Wysłać teraz mail do księgowości ({{ settings.accounting|join(', ') }}) i raport CFO? Dzisiejszy przebieg audytu wysyłamy tylko raz."
               data-msg="Wysyłam w tle — wynik zobaczysz w Raportach." data-reload="60000">{{ icon("mail") }} Wyślij teraz</button>
       <p class="text-xs text-ink-muted">„Wyślij teraz” działa tylko, gdy w CFO Studio jest dzisiejszy przebieg audytu (np. uruchomiony ręcznie w CFO Studio → Audyt).</p>
+      <div class="flex gap-2 border-t border-line pt-3">
+        <button type="button" class="btn-ghost flex-1 justify-center text-xs" data-run="/api/audit/run" data-params="mode=reminder_test" data-busy="Wysyłam…"
+                data-msg="Test przypomnienia wysłany do Ciebie (jeśli czegoś brakuje)." data-reload="30000">{{ icon("send", "h-3.5 w-3.5") }} Przypomnienie: test</button>
+        <button type="button" class="btn-ghost flex-1 justify-center text-xs" data-run="/api/audit/run" data-params="mode=reminder" data-busy="Wysyłam…"
+                data-confirm="Wysłać teraz przypomnienie o brakujących dokumentach do księgowości ({{ settings.accounting|join(', ') }})? Raz dziennie."
+                data-msg="Wysyłam przypomnienie w tle." data-reload="30000">{{ icon("mail", "h-3.5 w-3.5") }} Przypomnienie: wyślij</button>
+      </div>
       {% if state.accounting %}<p class="text-xs text-ink-muted">Ostatni mail do księgowości: przebieg #{{ state.accounting.run_id }}, {{ state.accounting.at }}.</p>{% endif %}
     </section>
 
     <section class="card overflow-hidden">
       <div class="panel-head"><h3 class="section-title">Ostatnio</h3></div>
-      {% for r, lbl in [(last, "Raport CFO"), (last_copy, "Mail do księgowości")] %}
+      {% for r, lbl in [(last, "Raport CFO"), (last_copy, "Mail do księgowości"), (last_reminder, "Przypomnienie o dokumentach")] %}
         {% if r %}
         <a href="/reports/{{ r.id }}" class="row-item">
           <span class="mt-0.5 text-ink-faint">{{ icon("file-text") }}</span>
@@ -98,7 +112,7 @@
         </a>
         {% endif %}
       {% endfor %}
-      {% if not last and not last_copy %}<p class="px-5 py-4 text-sm text-ink-muted">Jeszcze nic nie wysłano.</p>{% endif %}
+      {% if not last and not last_copy and not last_reminder %}<p class="px-5 py-4 text-sm text-ink-muted">Jeszcze nic nie wysłano.</p>{% endif %}
     </section>
   </div>
 </form>

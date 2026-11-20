@@ -24,7 +24,7 @@
 <div class="grid grid-cols-1 gap-5 2xl:grid-cols-2">
   <section class="card overflow-hidden">
     <div class="panel-head flex-wrap gap-2">
-      <h3 class="section-title">1 · Do księgowości</h3>
+      <h3 class="section-title">1 · Do księgowości (poniedziałek)</h3>
       <span class="text-xs text-ink-muted">{{ accounting.subject }}</span>
     </div>
     <div class="flex flex-wrap gap-1.5 border-b border-line px-5 py-3">
@@ -43,4 +43,16 @@
 {% else %}
 <section class="card p-5 text-sm text-ink-soft">{{ result.error or result.skipped or "Brak danych" }}</section>
 {% endif %}
+
+<section class="card mt-5 overflow-hidden">
+  <div class="panel-head flex-wrap gap-2">
+    <h3 class="section-title">3 · Przypomnienie o dokumentach (wt–pt)</h3>
+    <span class="text-xs text-ink-muted">{{ reminder.subject if reminder else "" }}</span>
+  </div>
+  {% if reminder %}
+  <iframe class="h-[60vh] w-full bg-canvas" sandbox srcdoc="{{ reminder_html|e }}"></iframe>
+  {% else %}
+  <p class="px-5 py-4 text-sm text-ink-muted">{{ reminder_note or "Brak brakujących dokumentów — przypomnienie by nie wyszło." }}</p>
+  {% endif %}
+</section>
 {% endblock %}

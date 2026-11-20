@@ -8,8 +8,9 @@ import pytest
 
 from src.common.timeutil import WARSAW
 from src.reports import audit
-from src.reports.audit import (WeeklyAudit, audit_ready, bridge_sentence, bridge_sums, build_accounting_mail, cash_section,
-                               check_csv, csv_value, finance_section, mln, oss_overdue, table_rows, tax_line, zl)
+from src.reports.audit import (WeeklyAudit, audit_ready, bridge_sentence, bridge_sums, build_accounting_mail,
+                               build_reminder_mail, cash_section, check_csv, csv_value, documents_owner_section,
+                               documents_section, finance_section, mln, months_ranges, oss_overdue, table_rows, tax_line, zl)
 
 MONDAY = date(2026, 11, 23)
 
@@ -246,14 +247,103 @@ def test_oss_deadline_and_tax_line_edges():
                      "vat_kraj_do_zaplaty": 0, "dochodowy_do_zaplaty": None}) == "AGT (I–X 2026) — nic do zapłaty"
 
 
+# ─── Document requests (D-096) ───────────────────────────────────────────────
+
+
+def _doc(code, entity, label, month, days, remind=True, reminders=0, url="https://drive.google.com/drive/folders/x1"):
+    return {"source_code": code, "entity": entity, "rodzaj": "wyciag_rachunek", "label": label, "folder_url": url,
+            "month": month, "termin": "2026-11-07", "dni_po_terminie": days, "status": "otwarte" if remind else "dostarczone",
+            "brak_teraz": True, "do_przypomnienia": remind, "reminders": reminders, "fulfilled_at": None, "sort": 10}
+
+
+DOCS = (
+    [_doc("wyciag:PKO-1", "delta", "PKO BP rachunek VAT (Delta)", f"2026-{m:02d}-01", 300 - 30 * m, reminders=12)
+     for m in range(1, 11)]
+    + [_doc("wyciag:ING-5276", "delta", "ING Konto PLN …5276", "2026-10-01", 13, reminders=3)]
+    + [_doc("lista_plac:agt", "agt", "Lista płac AGT (suma listy, PDF)", m, d, reminders=2,
+            url="https://drive.google.com/drive/folders/x2") for m, d in (("2025-09-01", 404), ("2025-10-01", 373))]
+    + [_doc("wyciag:ING-GBP", "delta", "ING Konto (GBP)", "2026-10-01", 13, remind=False)]  # uploaded, waits for import
+)
+
+
+def test_months_ranges_compress_consecutive_months():
+    assert months_ranges(["2025-11-01", "2025-12-01", "2026-01-01", "2026-03-01", "2026-04-01", "2026-06-01"]) == \
+        "11.2025–01.2026, 03.2026, 04.2026, 06.2026"
+    assert months_ranges(["2026-10-01"]) == "10.2026" and months_ranges([]) == ""
+
+
+def test_documents_section_per_company_with_folder_links_and_urgent_marks():
+    md = documents_section(DOCS)
+    assert md.startswith("## Prosimy o dokumenty")
+    assert md.index("### Delta Industries") < md.index("### All Good Things")
+    assert ("- **PKO BP rachunek VAT (Delta)** · brak: 01.2026–10.2026 · 270 dni po terminie · **pilne** · "
+            "[wrzućcie plik tutaj](https://drive.google.com/drive/folders/x1)") in md
+    assert "- **ING Konto PLN …5276** · brak: 10.2026 · 13 dni po terminie · [wrzućcie plik tutaj]" in md  # not urgent
+    assert "brak: 09.2025, 10.2025 · 404 dni po terminie · **pilne**" in md
+    assert "ING Konto (GBP)" not in md  # do_przypomnienia = false is never reminded
+    assert "W CFO Studio brakuje 13 poz. (pilne — ponad 14 dni po terminie: 11)" in md
+    assert "MT940" in md and "paski nie są potrzebne" in md
+    assert documents_section([d for d in DOCS if not d["do_przypomnienia"]]) == ""
+
+
+def test_accounting_mail_puts_document_requests_on_top_and_goes_out_for_documents_alone():
+    m = build_accounting_mail(REPORT, OPEN, MONDAY, documents=DOCS)
+    assert m["markdown"].startswith("## Prosimy o dokumenty") and m["documents"] == 13
+    assert m["lead"].startswith("Dzień dobry, na górze prosimy o brakujące dokumenty (13 poz., w tym pilnych: 11)")
+    assert len(m["document_rows"]) == 13
+    only_docs = build_accounting_mail([], [], MONDAY, documents=DOCS)
+    assert only_docs["checks"] == 0 and only_docs["documents"] == 13
+
+
+def test_reminder_mail_lists_urgent_first_and_counts_positions():
+    m = build_reminder_mail(DOCS, MONDAY)
+    assert m["subject"] == "MyBed — przypomnienie: brakujące dokumenty (13 poz.)"
+    body = m["markdown"]
+    assert body.index("## Pilne — ponad 14 dni po terminie") < body.index("## Pozostałe")
+    assert body.index("Lista płac AGT") < body.index("PKO BP rachunek VAT (Delta)") < body.index("ING Konto PLN")
+    assert "**Delta · ING Konto PLN …5276**" in body and "**AGT · Lista" not in body  # entity added only when missing
+    assert "Przypominamy codziennie, dopóki dokument nie trafi do folderu — po wgraniu przypomnienia ustają same." in body
+    assert "ING Konto (GBP)" not in body and m["urgent"] == 11
+
+
+def test_owner_documents_section_counts_oldest_reminders_delivered_and_escalation():
+    fin = {"documents": DOCS, "errors": {},
+           "document_reminders": [{"sent_at": "2026-11-23T06:00:01Z", "kind": "tygodniowy"},
+                                  {"sent_at": "2026-11-20T06:00:01Z", "kind": "codzienny"},
+                                  {"sent_at": "2026-11-10T06:00:01Z", "kind": "codzienny"}],
+           "documents_delivered": [{"entity": "delta", "label": "ING Konto (USD)", "month": "2026-10-01",
+                                    "status": "zrealizowane", "fulfilled_at": "2026-11-19T10:00:00Z"},
+                                   {"entity": "delta", "label": "Karta …4141", "month": "2026-10-01",
+                                    "status": "wstrzymane", "fulfilled_at": "2026-11-19T10:00:00Z"}]}
+    md, facts = documents_owner_section(fin, MONDAY)
+    assert "Brakuje **13** dokumentów (Delta 11, AGT 2); najstarszy: Lista płac AGT (suma listy, PDF) za 09.2025 — 404 dni po terminie." in md
+    assert "Przypomnień w ostatnich 7 dniach: **2** (tygodniowe 1, codzienne 1)." in md
+    assert "Dostarczone w ostatnich 7 dniach: ING Konto (USD) 10.2026." in md and "Karta" not in md
+    # > 30 days AND >= 10 reminders: only the Delta PKO VAT months up to VIII (IX = 30 days, X = 0) — not the payroll (2 reminders)
+    assert "**Do eskalacji**" in md and "- PKO BP rachunek VAT (Delta): 01.2026–08.2026 · 270 dni po terminie · 12 przypomnień" in md
+    assert "Lista płac AGT (suma listy, PDF): " not in md.split("**Do eskalacji**")[1]
+    assert facts["do_eskalacji"][0]["przypomnienia"] == 12
+    md, _ = documents_owner_section({"errors": {"documents": "HTTP 500"}}, MONDAY)
+    assert "Prośby o dokumenty niedostępne (HTTP 500)." in md
+
+
 # ─── Orchestration: send once, safety, test mode ─────────────────────────────
 
 
 class FakeClient:
     url = "https://cfo.example"
 
-    def __init__(self, run_at="2026-11-23T04:30:05Z", fail=False):
+    def __init__(self, run_at="2026-11-23T04:30:05Z", fail=False, documents=None, record_fails=False):
         self.run_at, self.fail = run_at, fail
+        self.documents = DOCS if documents is None else documents
+        self.record_fails = record_fails
+        self.calls = []
+
+    async def call(self, tool, args):
+        self.calls.append((tool, args))
+        if self.record_fails:
+            raise audit.CFOStudioError("CFO Studio: HTTP 500")
+        return '{"ok": true}'
 
     async def call_json(self, tool, args):
         if self.fail:
@@ -272,6 +362,9 @@ class FakeClient:
             rows = BRIDGE
         elif name == "tax_reserve":
             rows = RESERVE
+        elif name == "document_requests":
+            col = args["filters"][0]["column"]
+            rows = [d for d in self.documents if d["do_przypomnienia"]] if col == "do_przypomnienia" else []
         else:
             rows = []
         cols = list(rows[0]) if rows else []
@@ -335,6 +428,7 @@ async def test_run_sends_accounting_mail_with_cc_and_csv_then_owner_report_once(
     for word in ("Gotówka", "gotówk", "OSS", "PIT", "danina", "wynik"):
         assert word not in acc["html"]
     assert [s["agent_name"] for s in db.saved] == ["audit_ksiegowosc", "weekly_audit"]
+    assert "Prosimy o dokumenty" in acc["html"] and "wrzućcie plik tutaj" in acc["html"]
     assert db.settings["weekly_audit_state"]["accounting"]["run_id"] == 7
     # a second run (restart, retry, click) sends nothing
     again = await WeeklyAudit(db, client=FakeClient(), ai=FakeAI()).run(scheduled=True)
@@ -396,10 +490,65 @@ def test_email_message_carries_cc_reply_to_and_csv_attachment():
     assert att.get_payload(decode=True).startswith("﻿".encode())
 
 
+async def test_weekly_mail_records_the_document_reminder_once_and_never_in_test_mode(outbox):
+    client, db = FakeClient(), FakeDB()
+    await WeeklyAudit(db, client=client, ai=FakeAI()).run(scheduled=True)
+    (tool, args), = client.calls
+    assert tool == "document_reminder_sent" and args["kind"] == "tygodniowy"
+    assert args["recipients"] == "ksiegowosc@mybed.pl; kopia: owner@mybed.pl"
+    assert len(args["items"]) == 13 and {"source_code": "wyciag:ING-5276", "month": "2026-10-01"} in args["items"]
+    await WeeklyAudit(db, client=client, ai=FakeAI()).run(scheduled=True)  # already sent → no second record
+    assert len(client.calls) == 1
+    test_client = FakeClient()
+    await WeeklyAudit(FakeDB(), client=test_client, ai=FakeAI()).run(test_to=["me@mybed.pl"])
+    await WeeklyAudit(FakeDB(), client=test_client, ai=FakeAI()).run(dry_run=True, with_ai=False)
+    assert test_client.calls == []
+
+
+async def test_weekly_mail_record_failure_is_reported_but_mail_counts_as_sent(outbox):
+    db = FakeDB()
+    res = await WeeklyAudit(db, client=FakeClient(record_fails=True), ai=FakeAI()).run(scheduled=True)
+    assert "document_reminder_sent" in res["error"] and db.settings["weekly_audit_state"]["accounting"]["run_id"] == 7
+    assert "Nie udało się zapisać przypomnienia w CFO Studio: CFO Studio: HTTP 500." in outbox[1]["html"]
+
+
+async def test_daily_reminder_sends_once_a_day_and_records_it(outbox):
+    client, db = FakeClient(), FakeDB()
+    res = await WeeklyAudit(db, client=client).remind(scheduled=True)
+    assert res["count"] == 13 and res["recorded"]
+    mail, = outbox
+    assert mail["to"] == ["ksiegowosc@mybed.pl"] and mail["cc"] == ["owner@mybed.pl"] and mail["reply_to"] == ["owner@mybed.pl"]
+    assert mail["subject"] == "MyBed — przypomnienie: brakujące dokumenty (13 poz.)"
+    assert "wrzućcie plik tutaj" in mail["html"] and "ING Konto (GBP)" not in mail["html"]
+    (tool, args), = client.calls
+    assert tool == "document_reminder_sent" and args["kind"] == "codzienny" and len(args["items"]) == 13
+    assert db.saved[-1]["agent_name"] == "audit_dokumenty"
+    again = await WeeklyAudit(db, client=client).remind(scheduled=True)
+    assert "już dziś" in again["skipped"] and len(outbox) == 1 and len(client.calls) == 1
+
+
+async def test_daily_reminder_sends_nothing_when_nothing_is_missing_or_switched_off(outbox):
+    client = FakeClient(documents=[d for d in DOCS if not d["do_przypomnienia"]])
+    res = await WeeklyAudit(FakeDB(), client=client).remind(scheduled=True)
+    assert "skipped" in res and outbox == [] and client.calls == []
+    db = FakeDB()
+    db.settings["weekly_audit"] = {"doc_reminders": False}
+    assert "wyłączone" in (await WeeklyAudit(db, client=FakeClient()).remind(scheduled=True))["skipped"]
+    assert outbox == []
+
+
+async def test_daily_reminder_test_mode_goes_only_to_the_owner_without_recording(outbox):
+    client, db = FakeClient(), FakeDB()
+    await WeeklyAudit(db, client=client).remind(test_to=["me@mybed.pl"])
+    assert outbox[0]["to"] == ["me@mybed.pl"] and not outbox[0]["cc"] and outbox[0]["subject"].startswith("[TEST] ")
+    assert client.calls == [] and "doc_reminder_state" not in db.settings
+
+
 def test_weekly_audit_is_scheduled_monday_7_warsaw():
     from src import jobs
     from src.scheduler import DEFAULT_CRONS, MISFIRE_GRACE, TZ
 
     assert DEFAULT_CRONS["weekly_audit"] == "0 7 * * mon" and TZ == "Europe/Warsaw"
     assert "weekly_audit" in jobs.JOBS and MISFIRE_GRACE["weekly_audit"] >= 3600
+    assert DEFAULT_CRONS["doc_reminder"] == "0 7 * * tue-fri" and "doc_reminder" in jobs.JOBS
     assert set(jobs.JOBS) <= set(DEFAULT_CRONS)

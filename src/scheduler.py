@@ -29,9 +29,11 @@ DEFAULT_CRONS = {
     "live_refresh": "*/15 7-20 * * mon-sat",
     # CFO Studio audits on Monday 04:30 UTC (5:30 / 6:30 Warsaw); the e-mails go out at 7:00 Warsaw
     "weekly_audit": "0 7 * * mon",
+    # missing documents (CFO Studio D-096): on Monday they are in the audit e-mail, Tuesday–Friday a short reminder
+    "doc_reminder": "0 7 * * tue-fri",
 }
 # a missed run may still go out later in the morning (scheduler restarted around 7:00) — default 5 min
-MISFIRE_GRACE = {"weekly_audit": 3 * 3600}
+MISFIRE_GRACE = {"weekly_audit": 3 * 3600, "doc_reminder": 3 * 3600}
 
 
 def _cron(expr: str) -> CronTrigger:

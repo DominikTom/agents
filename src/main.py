@@ -176,14 +176,35 @@ async def panel_check(day: str | None) -> None:
               f"{round(float(w['revenue_gross_pln'])) if w else '—':>12}")
 
 
-async def run_audit(dry_run: bool, out: str | None, with_ai: bool, test_to: list[str], force: bool) -> None:
+async def run_audit(dry_run: bool, out: str | None, with_ai: bool, test_to: list[str], force: bool,
+                    reminder: bool = False) -> None:
     """Weekly CFO audit: --dry-run writes both e-mails (HTML, Markdown, CSV) to --out and sends nothing;
-    --test-to sends both only to the given address (marked [TEST]); without flags = the real Monday run."""
+    --test-to sends both only to the given address (marked [TEST]); without flags = the real Monday run.
+    --reminder: the Tuesday–Friday reminder about missing documents instead (same flags)."""
     from pathlib import Path
 
     from src import jobs
-    from src.reports.audit import WeeklyAudit, accounting_email_html, owner_email_html
+    from src.reports.audit import WeeklyAudit, accounting_email_html, owner_email_html, reminder_email_html
 
+    if reminder:
+        if not dry_run:
+            result = await jobs.doc_reminder(scheduled=False, force=force, test_to=test_to or None)
+            print(result)
+            if not result or result.get("error"):
+                sys.exit(1)
+            return
+        async with jobs.database() as db:
+            result = await WeeklyAudit(db).remind(dry_run=True)
+        if "mail" not in result:
+            print(result.get("error") or result.get("skipped") or result)
+            return
+        folder = Path(out or "audit-preview")
+        folder.mkdir(parents=True, exist_ok=True)
+        m = result["mail"]
+        (folder / "3_przypomnienie.html").write_text(reminder_email_html(m), encoding="utf-8")
+        (folder / "3_przypomnienie.md").write_text(f"{m['subject']}\n\n{m['lead']}\n\n{m['markdown']}", encoding="utf-8")
+        print(f"{m['subject']} · pilnych {m['urgent']} · zapisano w {folder.resolve()}")
+        return
     if not dry_run:
         result = await jobs.weekly_audit(scheduled=False, force=force, test_to=test_to or None)
         print(result)
@@ -236,6 +257,7 @@ def main() -> None:
     au.add_argument("--no-ai", action="store_true", help="--dry-run without the AI comment")
     au.add_argument("--test-to", action="append", default=[], help="Send both e-mails only to this address ([TEST])")
     au.add_argument("--force", action="store_true", help="Send again even if this audit run was already e-mailed")
+    au.add_argument("--reminder", action="store_true", help="Tuesday–Friday reminder about missing documents instead")
 
     args = parser.parse_args()
     config = load_config()
@@ -256,7 +278,7 @@ def main() -> None:
     elif args.command == "panel-check":
         asyncio.run(panel_check(args.day))
     elif args.command == "audit":
-        asyncio.run(run_audit(args.dry_run, args.out, not args.no_ai, args.test_to, args.force))
+        asyncio.run(run_audit(args.dry_run, args.out, not args.no_ai, args.test_to, args.force, args.reminder))
 
 
 if __name__ == "__main__":

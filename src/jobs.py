@@ -324,6 +324,17 @@ async def weekly_audit(db: Database | None = None, *, scheduled: bool = True, fo
     return await _logged(db, "weekly_audit", WeeklyAudit(db).run(scheduled=scheduled, force=force, test_to=test_to))
 
 
+async def doc_reminder(db: Database | None = None, *, scheduled: bool = True, force: bool = False,
+                       test_to: list[str] | None = None) -> dict | None:
+    """Tuesday–Friday 7:00: reminder to the accounting office about documents missing in CFO Studio (nothing when none)."""
+    from src.reports.audit import WeeklyAudit
+
+    if db is None:
+        async with database() as db:
+            return await doc_reminder(db, scheduled=scheduled, force=force, test_to=test_to)
+    return await _logged(db, "doc_reminder", WeeklyAudit(db).remind(scheduled=scheduled, force=force, test_to=test_to))
+
+
 # name -> (label, coroutine factory) — used by the scheduler and the "Uruchom" buttons
 JOBS = {
     "whatsapp_sync": ("Synchronizacja WhatsApp", whatsapp_sync),
@@ -338,4 +349,5 @@ JOBS = {
     "whatsapp_watchdog": ("Alarm: WhatsApp rozłączony", whatsapp_watchdog),
     "live_refresh": ("Na żywo: maile i zamykanie spraw", live_refresh),
     "weekly_audit": ("Audyt CFO: mail do księgowości + raport CFO", weekly_audit),
+    "doc_reminder": ("Przypomnienie księgowości o dokumentach (wt–pt)", doc_reminder),
 }

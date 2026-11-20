@@ -113,7 +113,8 @@ SOURCES: dict[str, dict] = {
                       "faktur producentów i transportem z kalkulatora panelu. W poniedziałki audyt dokumentów Delty i AGT "
                       "(audit_runs, audit_report, audit_findings) → mail do księgowości z plikami CSV i raport CFO "
                       "(Studio raportów → Audyt CFO); w raporcie CFO też most od wyniku do gotówki i podatki do zapłaty "
-                      "(cash_bridge_monthly, tax_reserve, tax_payments — szacunek).",
+                      "(cash_bridge_monthly, tax_reserve, tax_payments — szacunek). Prośby o dokumenty (document_requests): na górze "
+                      "poniedziałkowego maila, wt–pt przypomnienie do księgowości, po wysłaniu document_reminder_sent.",
         "job": "weekly_audit",
         "health": None,
     },
