@@ -112,7 +112,8 @@ SOURCES: dict[str, dict] = {
                       "narzędzia cfo_* w MCP Agentów. Wynik realny = księgi Incro z kosztem produkcji wg cennika zamiast "
                       "faktur producentów i transportem z kalkulatora panelu. W poniedziałki audyt dokumentów Delty i AGT "
                       "(audit_runs, audit_report, audit_findings) → mail do księgowości z plikami CSV i raport CFO "
-                      "(Studio raportów → Audyt CFO).",
+                      "(Studio raportów → Audyt CFO); w raporcie CFO też most od wyniku do gotówki i podatki do zapłaty "
+                      "(cash_bridge_monthly, tax_reserve, tax_payments — szacunek).",
         "job": "weekly_audit",
         "health": None,
     },

@@ -8,8 +8,8 @@ import pytest
 
 from src.common.timeutil import WARSAW
 from src.reports import audit
-from src.reports.audit import (WeeklyAudit, audit_ready, build_accounting_mail, check_csv, csv_value, finance_section,
-                               table_rows, zl)
+from src.reports.audit import (WeeklyAudit, audit_ready, bridge_sentence, bridge_sums, build_accounting_mail, cash_section,
+                               check_csv, csv_value, finance_section, mln, oss_overdue, table_rows, tax_line, zl)
 
 MONDAY = date(2026, 11, 23)
 
@@ -163,7 +163,7 @@ def test_finance_section_marks_payroll_estimates_and_survives_missing_parts():
     assert "płace szacowane z wyciągów" in md
     assert "listopad 2026 (w toku)" in md
     assert "Niedostępne: CFO Studio: HTTP 500." in md  # Delta
-    assert "przepływ netto **−200 zł**" in md
+    assert "rozliczenie w grupie" in md and "Gotówka AGT" not in md  # cash is commented for the group (D-089)
     assert "Brak zamkniętych miesięcy 2026" in md  # group
     assert facts["agt"][0]["place_zrodlo"] == "wyciag"
 
@@ -173,6 +173,77 @@ def test_money_formatting():
     assert zl(-402857, True) == "−402 857,00 zł"
     assert zl(None) == "—" and zl(-0.2) == "0 zł"
     assert table_rows({"columns": ["a", "b"], "rows": [[1, 2]]}) == [{"a": 1, "b": 2}]
+
+
+# ─── Cash (D-089): result → change in cash, taxes to pay ─────────────────────
+
+
+def _bridge(entity, month, wynik, zmiana, podatek, vat, wlasciciel, powiazane, podwojne, klienci, koszty):
+    return {"entity": entity, "month": month, "wynik": wynik, "zmiana_gotowki": zmiana, "l_podatek": podatek, "l_vat": vat,
+            "l_wlasciciel": wlasciciel, "l_powiazane": powiazane, "l_podwojne": podwojne, "l_klienci": klienci,
+            "l_koszty": koszty}
+
+
+# Grupa I–IX 2026 squeezed into two months with the same sums as CFO Studio's cash_bridge_monthly
+BRIDGE = [
+    _bridge("grupa", "2026-01-01", 3_000_000, 200_000, -986_619.56, -300_000, -300_000, -211_165, -300_000, 1_000_000,
+            -1_702_215.44),
+    _bridge("grupa", "2026-09-01", 2_024_193, 268_730.79, -1_000_000, -308_323.76, -276_121.05, -150_003, -388_987.01,
+            1_439_832.43, -1_072_273.89),
+    _bridge("delta", "2026-09-01", 925_762.9, 880_353.55, -4, 267_945.32, -45_000, 335_871.9, -420_687.98, 271_845.61,
+            -455_380.2),
+    _bridge("agt", "2026-10-01", 572_444, -396_444.17, 0, -114_494.43, 0, -311_271.9, -400_460.79, -106_648.72, -36_012.33),
+    _bridge("grupa", "2025-12-01", 1, 1, 0, 0, 0, 0, 0, 0, 0),
+]
+RESERVE = [
+    {"entity": "agt", "rok": 2026, "do_miesiaca": "2026-10-01", "oss_do_zaplaty": 0, "vat_kraj_do_zaplaty": 25526,
+     "dochodowy_do_zaplaty": None},
+    {"entity": "delta", "rok": 2026, "do_miesiaca": "2026-09-01", "oss_do_zaplaty": 942149, "vat_kraj_do_zaplaty": -588285,
+     "dochodowy_do_zaplaty": 773231},
+]
+
+
+def test_bridge_sentence_follows_the_pattern():
+    b = bridge_sums(BRIDGE, "grupa", 2026)
+    assert b["months"] == ["2026-01-01", "2026-09-01"]  # 2025 left out
+    assert bridge_sentence("Grupa", b) == (
+        "Grupa — wynik 5,02 mln → na rachunkach +0,47 mln. Najwięcej zabrały: koszty i reszta −2,77 mln, "
+        "podatek dochodowy −1,99 mln, podwójne FV −0,69 mln; dołożyli klienci +2,44 mln.")
+    assert mln(-588285) == "−0,59 mln" and mln(2000, True) == "0,00 mln" and mln(None) == "—"
+
+
+def test_cash_section_group_and_delta_taxes_and_urgent():
+    md, facts = cash_section({"cash_bridge": BRIDGE, "tax_reserve": RESERVE}, date(2026, 11, 23), "https://cfo.example/grupa")
+    assert "**Gotówka 2026 (I–IX):** Grupa — wynik 5,02 mln → na rachunkach +0,47 mln." in md
+    assert "Delta (IX 2026) — wynik 0,93 mln → na rachunkach +0,88 mln." in md
+    assert ("**Do zapłaty (szacunek):** Delta (I–IX 2026) — OSS 0,94 mln, PIT + danina 0,77 mln; nadwyżka VAT krajowego "
+            "0,59 mln do odzyskania. AGT (I–X 2026) — VAT krajowy 0,03 mln.") in md
+    assert "OSS po terminie — Delta 0,94 mln (szacunek; termin za III kw. 2026 minął 31.10)" in md
+    assert "Rezerwa na PIT — Delta: szacunkowo 0,77 mln" in md
+    assert "| **Zmiana gotówki** | **+0,47** | **+0,88** |" in md
+    assert "[Od wyniku Grupy do gotówki](https://cfo.example/grupa)" in md
+    assert facts["most"]["grupa"]["linie"]["Koszty i reszta"] == -2774489 and len(facts["pilne"]) == 2
+
+
+def test_cash_section_without_bridge_or_reserve_does_not_guess():
+    md, facts = cash_section({"cash_bridge": BRIDGE[-1:], "tax_reserve": []}, date(2026, 11, 23), "u")
+    assert "Most gotówkowy niedostępny" in md and "mln" not in md
+    assert "**Do zapłaty:** most gotówkowy niedostępny" in md  # taxes too
+    md, _ = cash_section({"cash_bridge": BRIDGE, "tax_reserve": [], "errors": {"tax_reserve": "HTTP 500"}},
+                         date(2026, 11, 23), "u")
+    assert "Grupa — wynik 5,02 mln" in md and "**Do zapłaty:** most gotówkowy niedostępny (HTTP 500)." in md
+
+
+def test_oss_deadline_and_tax_line_edges():
+    row = {"entity": "delta", "rok": 2026, "do_miesiaca": "2026-09-01", "oss_do_zaplaty": 1000}
+    assert oss_overdue(row, date(2026, 10, 31)) is None  # deadline day itself
+    assert "31.10" in oss_overdue(row, date(2026, 11, 1))
+    assert oss_overdue({**row, "do_miesiaca": "2026-02-01"}, date(2026, 11, 1)) is None  # no full quarter yet
+    assert "30.04" in oss_overdue({**row, "do_miesiaca": "2026-04-01"}, date(2026, 5, 4))
+    assert "31.01" in oss_overdue({**row, "do_miesiaca": "2026-12-01"}, date(2027, 2, 1))
+    assert oss_overdue({**row, "oss_do_zaplaty": 0}, date(2026, 11, 1)) is None
+    assert tax_line({"entity": "agt", "rok": 2026, "do_miesiaca": "2026-10-01", "oss_do_zaplaty": 0,
+                     "vat_kraj_do_zaplaty": 0, "dochodowy_do_zaplaty": None}) == "AGT (I–X 2026) — nic do zapłaty"
 
 
 # ─── Orchestration: send once, safety, test mode ─────────────────────────────
@@ -197,6 +268,10 @@ class FakeClient:
             rows = REPORT
         elif name == "audit_findings":
             rows = OPEN if args["filters"][0]["column"] == "status" else []
+        elif name == "cash_bridge_monthly":
+            rows = BRIDGE
+        elif name == "tax_reserve":
+            rows = RESERVE
         else:
             rows = []
         cols = list(rows[0]) if rows else []
@@ -255,6 +330,10 @@ async def test_run_sends_accounting_mail_with_cc_and_csv_then_owner_report_once(
     assert own["to"] == ["owner@mybed.pl"] and own["subject"] == "Raport CFO — tydzień 48 · Delta + AGT"
     assert "Komentarz agenta." in own["html"] and "https://cfo.example/audyt" in own["html"]
     assert "−11 000 zł vs poprzedni przebieg" in own["html"]
+    # cash and taxes (D-089) only in the owner's report, never in the accounting e-mail
+    assert "Gotówka 2026 (I–IX)" in own["html"] and "OSS po terminie" in own["html"]
+    for word in ("Gotówka", "gotówk", "OSS", "PIT", "danina", "wynik"):
+        assert word not in acc["html"]
     assert [s["agent_name"] for s in db.saved] == ["audit_ksiegowosc", "weekly_audit"]
     assert db.settings["weekly_audit_state"]["accounting"]["run_id"] == 7
     # a second run (restart, retry, click) sends nothing
