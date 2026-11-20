@@ -312,6 +312,18 @@ async def run_report(key: str, db: Database | None = None, deliver: bool = True,
         return None  # already logged by the engine
 
 
+async def weekly_audit(db: Database | None = None, *, scheduled: bool = True, force: bool = False,
+                       test_to: list[str] | None = None) -> dict | None:
+    """Monday 7:00: CFO Studio's weekly document audit → e-mail to the accounting office (owner in CC) and the owner's
+    CFO report. Sends each audit run once; when the audit did not run today, only a short note to the owner."""
+    from src.reports.audit import WeeklyAudit
+
+    if db is None:
+        async with database() as db:
+            return await weekly_audit(db, scheduled=scheduled, force=force, test_to=test_to)
+    return await _logged(db, "weekly_audit", WeeklyAudit(db).run(scheduled=scheduled, force=force, test_to=test_to))
+
+
 # name -> (label, coroutine factory) — used by the scheduler and the "Uruchom" buttons
 JOBS = {
     "whatsapp_sync": ("Synchronizacja WhatsApp", whatsapp_sync),
@@ -325,4 +337,5 @@ JOBS = {
     "team_updates": ("Raporty dnia zespołu (AI)", team_updates),
     "whatsapp_watchdog": ("Alarm: WhatsApp rozłączony", whatsapp_watchdog),
     "live_refresh": ("Na żywo: maile i zamykanie spraw", live_refresh),
+    "weekly_audit": ("Audyt CFO: mail do księgowości + raport CFO", weekly_audit),
 }

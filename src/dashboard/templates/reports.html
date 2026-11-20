@@ -6,12 +6,12 @@
 <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
   <div>
     <h2 class="page-title">Raporty</h2>
-    <p class="page-subtitle">Poranny briefing, podsumowanie dnia i tygodnia. Zakres, godziny i adresatów ustawisz w Studio.</p>
+    <p class="page-subtitle">Poranny briefing, podsumowanie dnia i tygodnia, a w poniedziałki raport CFO i kontrole dla księgowości. Zakres, godziny i adresatów ustawisz w Studio.</p>
   </div>
   <div class="relative" data-dropdown>
     <button class="btn-primary" data-dropdown-trigger>{{ icon("sparkles") }} Wygeneruj teraz {{ icon("chevron-down", "h-3.5 w-3.5 opacity-70") }}</button>
     <div data-dropdown-menu class="absolute right-0 top-11 z-50 hidden w-72 animate-scale-in rounded-2xl border border-line bg-surface p-1 shadow-pop">
-      {% for key, label in labels.items() %}
+      {% for key, label in run_labels.items() %}
       <button class="nav-link w-full !items-start !py-2" data-run="/api/reports/{{ key }}/run" data-deliver="0" data-busy="Uruchamiam…"
               data-msg="{{ label }} generuje się w tle (1–2 min)." data-reload="90000">
         <span class="mt-0.5 text-ink-faint">{{ icon("file-text") }}</span>
@@ -36,7 +36,7 @@
     {% for r in reports %}
     <a href="/reports/{{ r.id }}" class="row-item !py-3.5">
       <span class="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-primary-soft text-primary-ink">
-        {{ icon({"morning_briefing": "sun", "daily_wrap": "clock", "weekly_review": "calendar"}.get(r.agent_name, "file-text")) }}
+        {{ icon({"morning_briefing": "sun", "daily_wrap": "clock", "weekly_review": "calendar", "weekly_audit": "chart-line", "audit_ksiegowosc": "mail"}.get(r.agent_name, "file-text")) }}
       </span>
       <div class="min-w-0 flex-1">
         <div class="flex flex-wrap items-center gap-2">

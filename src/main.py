@@ -5,6 +5,7 @@ Usage:
     python -m src.main report morning_briefing  # generate + deliver a report now
     python -m src.main report daily_wrap --no-deliver
     python -m src.main job whatsapp_sync        # run one background job now
+    python -m src.main audit --dry-run --out ./audit-preview   # weekly CFO audit e-mails as files, nothing sent
     python -m src.main test-connector gmail
 """
 
@@ -175,6 +176,41 @@ async def panel_check(day: str | None) -> None:
               f"{round(float(w['revenue_gross_pln'])) if w else '—':>12}")
 
 
+async def run_audit(dry_run: bool, out: str | None, with_ai: bool, test_to: list[str], force: bool) -> None:
+    """Weekly CFO audit: --dry-run writes both e-mails (HTML, Markdown, CSV) to --out and sends nothing;
+    --test-to sends both only to the given address (marked [TEST]); without flags = the real Monday run."""
+    from pathlib import Path
+
+    from src import jobs
+    from src.reports.audit import WeeklyAudit, accounting_email_html, owner_email_html
+
+    if not dry_run:
+        result = await jobs.weekly_audit(scheduled=False, force=force, test_to=test_to or None)
+        print(result)
+        if not result or result.get("error"):
+            sys.exit(1)
+        return
+    async with jobs.database() as db:
+        result = await WeeklyAudit(db).run(dry_run=True, with_ai=with_ai)
+    if "mails" not in result:
+        print(result.get("error") or result)
+        if isinstance(result.get("notice"), dict):
+            print(result["notice"]["lead"])
+        sys.exit(1)
+    folder = Path(out or "audit-preview")
+    folder.mkdir(parents=True, exist_ok=True)
+    acc, owner = result["mails"]["accounting"], result["mails"]["owner"]
+    (folder / "1_ksiegowosc.html").write_text(accounting_email_html(acc), encoding="utf-8")
+    (folder / "1_ksiegowosc.md").write_text(f"{acc['subject']}\n\n{acc['lead']}\n\n{acc['markdown']}", encoding="utf-8")
+    for a in acc["attachments"]:
+        (folder / a["filename"]).write_bytes(a["content"])
+    (folder / "2_raport_cfo.html").write_text(owner_email_html(owner), encoding="utf-8")
+    (folder / "2_raport_cfo.md").write_text(f"{owner['subject']}\n\n{owner['lead']}\n\n{owner['markdown']}", encoding="utf-8")
+    print(f"{acc['subject']}: {acc['open']} otwartych, {acc['urgent']} pilnych, {len(acc['attachments'])} CSV")
+    print(f"{owner['subject']}: {owner['lead']}")
+    print(f"Zapisano w {folder.resolve()}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="MyBed Agents")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -194,6 +230,12 @@ def main() -> None:
     erp.add_argument("day", nargs="?", help="YYYY-MM-DD, default yesterday")
     pc = sub.add_parser("panel-check", help="A day's sales per shop from the new ERP (shop APIs) vs dash")
     pc.add_argument("day", nargs="?", help="YYYY-MM-DD, default today")
+    au = sub.add_parser("audit", help="Weekly CFO audit e-mails (accounting office + owner's CFO report)")
+    au.add_argument("--dry-run", action="store_true", help="Build the e-mails as files, send and save nothing")
+    au.add_argument("--out", help="Folder for --dry-run (default ./audit-preview)")
+    au.add_argument("--no-ai", action="store_true", help="--dry-run without the AI comment")
+    au.add_argument("--test-to", action="append", default=[], help="Send both e-mails only to this address ([TEST])")
+    au.add_argument("--force", action="store_true", help="Send again even if this audit run was already e-mailed")
 
     args = parser.parse_args()
     config = load_config()
@@ -213,6 +255,8 @@ def main() -> None:
         asyncio.run(erp_check(args.day, config))
     elif args.command == "panel-check":
         asyncio.run(panel_check(args.day))
+    elif args.command == "audit":
+        asyncio.run(run_audit(args.dry_run, args.out, not args.no_ai, args.test_to, args.force))
 
 
 if __name__ == "__main__":

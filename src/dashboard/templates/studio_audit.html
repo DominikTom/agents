@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+{% block title %}Audyt CFO · Studio raportów{% endblock %}
+
+{% block content %}
+<div class="mb-5">
+  <h2 class="page-title">Studio raportów</h2>
+  <p class="page-subtitle">Decydujesz, co jest w raportach, w jakiej kolejności, jak długie mają być i kiedy przychodzą. Zmiany działają od następnego raportu.</p>
+</div>
+
+<div class="mb-5 flex gap-5 overflow-x-auto border-b border-line scrollbar-hide">
+  {% for k, p in profiles.items() %}
+  <a href="/studio/{{ k }}" class="tab"><span class="dot {{ 'bg-emerald-500' if p.enabled else 'bg-slate-300' }}"></span>{{ p.name }}</a>
+  {% endfor %}
+  <a href="/studio/audit" class="tab tab-active"><span class="dot {{ 'bg-emerald-500' if settings.enabled else 'bg-slate-300' }}"></span>Audyt CFO</a>
+  <a href="/studio/general" class="tab">{{ icon("user-round") }} O mnie i ustawienia</a>
+</div>
+
+{% if saved %}
+<div class="mb-4 flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-700">{{ icon("circle-check") }} Zapisano.</div>
+{% endif %}
+
+<form method="post" action="/studio/audit" class="grid grid-cols-1 gap-5 xl:grid-cols-5">
+  <div class="space-y-5 xl:col-span-3">
+    <section class="card p-5 space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <label class="flex items-center gap-3">
+          <input type="checkbox" name="enabled" class="peer sr-only" {{ 'checked' if settings.enabled }}>
+          <span class="toggle"></span>
+          <span class="text-sm font-semibold text-ink">Wysyłaj w poniedziałki o 7:00</span>
+        </label>
+        <span class="text-xs text-ink-muted">{% if last_run %}ostatnio {{ last_run.ran_at|ago }}{% if last_run.status == "error" %} · <span class="text-red-600">{{ last_run.error_message }}</span>{% endif %}{% else %}jeszcze nie uruchamiany{% endif %}</span>
+      </div>
+      <p class="text-xs leading-relaxed text-ink-muted">
+        CFO Studio liczy audyt Delty i All Good Things w poniedziałek o 04:30 UTC. O 7:00 Agents pobiera wynik i wysyła
+        <b>dwa maile</b>: kontrole dokumentów do księgowości (automatycznie, Ty w kopii, odpowiedzi trafiają do Ciebie;
+        bez wyników finansowych i danych osobowych, z plikami CSV) oraz <b>raport CFO</b> dla Ciebie — wyniki, audyt tydzień
+        do tygodnia i komentarz AI. Jeśli dzisiejszego przebiegu audytu nie ma, księgowość nie dostaje nic, a Ty krótką
+        informację z godziną ostatniego przebiegu. Każdy przebieg wysyłamy tylko raz.
+      </p>
+    </section>
+
+    <section class="card p-5 space-y-4">
+      <h3 class="section-title">Adresy</h3>
+      <div>
+        <label class="label">Księgowość (do)</label>
+        <input name="accounting" class="input" value="{{ settings.accounting|join(', ') }}" placeholder="ksiegowosc@mybed.pl">
+      </div>
+      <div>
+        <label class="label">Właściciel (kopia maila do księgowości + raport CFO)</label>
+        <input name="owner" class="input" value="{{ settings.owner|join(', ') }}" placeholder="{{ owner|join(', ') or 'dominik.tomaszczyk@mybed.pl' }}">
+        <p class="mt-1 text-xs text-ink-muted">Puste = domyślni adresaci z „O mnie i ustawienia” (teraz: {{ owner|join(', ') or "brak" }}). Kilka adresów oddziel przecinkiem.</p>
+      </div>
+      {% if not config.email %}<p class="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">Wysyłka e-mail nie jest skonfigurowana: dodaj <span class="font-mono">RESEND_API_KEY</span> albo SMTP w .env.</p>{% endif %}
+      {% if not config.cfo_studio %}<p class="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">Brak <span class="font-mono">CFO_STUDIO_API_KEY</span> w .env — audyt nie ma skąd pobrać danych (klucz z zakresem pełnym, e-mail właściciela).</p>{% endif %}
+    </section>
+
+    <section class="card p-5 space-y-4">
+      <h3 class="section-title">Komentarz agenta w raporcie CFO</h3>
+      <div>
+        <label class="label">Model AI</label>
+        <select name="model" class="input">
+          {% for m in models %}<option value="{{ m.id }}" {{ 'selected' if settings.model == m.id }}>{{ m.label }} — {{ m.hint }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="label">Dodatkowe instrukcje (opcjonalnie)</label>
+        <textarea name="instructions" rows="4" class="textarea" placeholder="Np. Zawsze napisz, ile zostało do korekty w AGT po błędzie integracji z X 2026.">{{ settings.instructions }}</textarea>
+      </div>
+    </section>
+    <button class="btn-primary w-full">{{ icon("check") }} Zapisz</button>
+  </div>
+
+  <div class="space-y-5 xl:col-span-2">
+    <section class="card p-5 space-y-3">
+      <h3 class="section-title">Sprawdź i wyślij</h3>
+      <a class="btn-secondary w-full justify-center" href="/studio/audit/preview">{{ icon("eye") }} Podgląd obu maili (bez wysyłki)</a>
+      <a class="btn-ghost w-full justify-center text-xs" href="/studio/audit/preview?ai=1">Podgląd z komentarzem AI (ok. 1 min)</a>
+      <button type="button" class="btn-secondary w-full justify-center" data-run="/api/audit/run" data-params="mode=test" data-busy="Wysyłam…"
+              data-msg="Test wysłany do Ciebie (oba maile, oznaczone [TEST])." data-reload="60000">{{ icon("send") }} Wyślij test tylko do mnie</button>
+      <button type="button" class="btn-primary w-full justify-center" data-run="/api/audit/run" data-params="mode=send" data-busy="Wysyłam…"
+              data-confirm="Wysłać teraz mail do księgowości ({{ settings.accounting|join(', ') }}) i raport CFO? Dzisiejszy przebieg audytu wysyłamy tylko raz."
+              data-msg="Wysyłam w tle — wynik zobaczysz w Raportach." data-reload="60000">{{ icon("mail") }} Wyślij teraz</button>
+      <p class="text-xs text-ink-muted">„Wyślij teraz” działa tylko, gdy w CFO Studio jest dzisiejszy przebieg audytu (np. uruchomiony ręcznie w CFO Studio → Audyt).</p>
+      {% if state.accounting %}<p class="text-xs text-ink-muted">Ostatni mail do księgowości: przebieg #{{ state.accounting.run_id }}, {{ state.accounting.at }}.</p>{% endif %}
+    </section>
+
+    <section class="card overflow-hidden">
+      <div class="panel-head"><h3 class="section-title">Ostatnio</h3></div>
+      {% for r, lbl in [(last, "Raport CFO"), (last_copy, "Mail do księgowości")] %}
+        {% if r %}
+        <a href="/reports/{{ r.id }}" class="row-item">
+          <span class="mt-0.5 text-ink-faint">{{ icon("file-text") }}</span>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm font-medium text-ink">{{ lbl }}</div>
+            <div class="truncate text-xs text-ink-faint">{{ r.generated_at|ago }} · {{ r.title }}</div>
+          </div>
+        </a>
+        {% endif %}
+      {% endfor %}
+      {% if not last and not last_copy %}<p class="px-5 py-4 text-sm text-ink-muted">Jeszcze nic nie wysłano.</p>{% endif %}
+    </section>
+  </div>
+</form>
+{% endblock %}

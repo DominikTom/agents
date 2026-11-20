@@ -107,11 +107,13 @@ SOURCES: dict[str, dict] = {
                 "zamówienia, faktury z Fakturowni i zapytania SQL. Bez MittoHome i NOMO (All Good Things).",
         "how": "Serwer MCP CFO Studio (mybed-cfo-studio.vercel.app/api/mcp) z kluczem API aplikacji (CFO_STUDIO_API_KEY w .env). "
                "Logika i uprawnienia zostają w CFO Studio — klucz „bez danych bankowych” nie widzi wyciągów ani SQL.",
-        "cadence": "przy otwarciu Pulpitu (pamięć 10 min), przy raporcie i w MCP",
+        "cadence": "przy otwarciu Pulpitu (pamięć 10 min), przy raporcie, w MCP i w poniedziałki o 7:00 (audyt)",
         "processing": "Karta „Finanse” na Pulpicie, sekcja „Finanse (CFO Studio)” w raportach (włączasz w Studio), "
                       "narzędzia cfo_* w MCP Agentów. Wynik realny = księgi Incro z kosztem produkcji wg cennika zamiast "
-                      "faktur producentów i transportem z kalkulatora panelu.",
-        "job": None,
+                      "faktur producentów i transportem z kalkulatora panelu. W poniedziałki audyt dokumentów Delty i AGT "
+                      "(audit_runs, audit_report, audit_findings) → mail do księgowości z plikami CSV i raport CFO "
+                      "(Studio raportów → Audyt CFO).",
+        "job": "weekly_audit",
         "health": None,
     },
     "ideaerp": {

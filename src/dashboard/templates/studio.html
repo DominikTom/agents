@@ -14,6 +14,7 @@
     <span class="dot {{ 'bg-emerald-500' if p.enabled else 'bg-slate-300' }}"></span>{{ p.name }}
   </a>
   {% endfor %}
+  <a href="/studio/audit" class="tab">{{ icon("chart-line") }} Audyt CFO</a>
   <a href="/studio/general" class="tab {{ 'tab-active' if key == 'general' }}">{{ icon("user-round") }} O mnie i ustawienia</a>
 </div>
 

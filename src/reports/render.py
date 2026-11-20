@@ -188,7 +188,7 @@ def _style_cells(content: str) -> str:
 
 
 def email_html(*, label: str, title: str, body_html: str, url: str | None, footer: str,
-               lead: str = "", kpi_html: str = "", sources: str = "") -> str:
+               lead: str = "", kpi_html: str = "", sources: str = "", button_label: str = "Otwórz w panelu") -> str:
     content = _style_cells(body_html)  # before inlining, while tags are still bare
     for pattern, repl in _INLINE:
         content = re.sub(pattern, repl, content)
@@ -196,7 +196,7 @@ def email_html(*, label: str, title: str, body_html: str, url: str | None, foote
     button = (
         f'<a href="{html.escape(url)}" style="display:inline-block;background:{PRIMARY};color:#FFFFFF;'
         f'font-size:14px;font-weight:600;text-decoration:none;padding:10px 18px;border-radius:8px;">'
-        f"Otwórz w panelu</a>"
+        f"{html.escape(button_label)}</a>"
         if url else ""
     )
     lead_html = (

@@ -19,7 +19,7 @@
         <div class="text-sm font-medium text-ink">{{ label }}</div>
         <div class="truncate text-xs text-ink-faint">{% if r %}{{ r.ran_at|ago }}{% if r.duration_ms %} · {{ (r.duration_ms / 1000)|round(1) }} s{% endif %}{% if r.error_message %} · <span class="text-red-600">{{ r.error_message }}</span>{% endif %}{% else %}jeszcze nie uruchamiane{% endif %}</div>
       </div>
-      <button class="btn-ghost !py-1 text-xs" data-run="/api/jobs/{{ name }}/run" data-msg="{{ label }}: uruchomiono">{{ icon("play", "h-3.5 w-3.5") }} Uruchom</button>
+      <button class="btn-ghost !py-1 text-xs" data-run="/api/jobs/{{ name }}/run" data-msg="{{ label }}: uruchomiono"{% if name == "weekly_audit" %} data-confirm="Wysłać teraz mail do księgowości i raport CFO? Każdy przebieg audytu wysyłamy tylko raz — ponowne kliknięcie niczego nie zdubluje."{% endif %}>{{ icon("play", "h-3.5 w-3.5") }} Uruchom</button>
     </div>
     {% endfor %}
   </section>

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+{% block title %}Podgląd · Audyt CFO{% endblock %}
+
+{% block content %}
+<a href="/studio/audit" class="btn-ghost -ml-2.5 mb-3">{{ icon("chevron-left") }} Audyt CFO</a>
+<div class="mb-5">
+  <h2 class="page-title">Podgląd maili audytu</h2>
+  <p class="page-subtitle">Zbudowane z dzisiejszych danych CFO Studio. Nic nie zostało wysłane ani zapisane.{% if not ai %} Komentarz AI pominięty — <a class="font-medium text-primary-ink hover:underline" href="?ai=1">podgląd z komentarzem</a>.{% endif %}</p>
+</div>
+
+{% if notice %}
+<section class="card p-5">
+  <div class="flex items-start gap-3">
+    <span class="mt-0.5 text-amber-600">{{ icon("triangle-alert") }}</span>
+    <div>
+      <div class="text-sm font-semibold text-ink">{{ notice.subject }}</div>
+      <p class="mt-1 text-sm text-ink-soft">{{ notice.lead }}</p>
+      <p class="mt-2 text-xs text-ink-muted">Tak wyglądałby dziś poniedziałkowy przebieg: księgowość nie dostaje nic, Ty — tę informację.</p>
+    </div>
+  </div>
+</section>
+{% elif accounting %}
+<div class="grid grid-cols-1 gap-5 2xl:grid-cols-2">
+  <section class="card overflow-hidden">
+    <div class="panel-head flex-wrap gap-2">
+      <h3 class="section-title">1 · Do księgowości</h3>
+      <span class="text-xs text-ink-muted">{{ accounting.subject }}</span>
+    </div>
+    <div class="flex flex-wrap gap-1.5 border-b border-line px-5 py-3">
+      {% for a in accounting.attachments %}<span class="chip border-line text-ink-muted">{{ icon("paperclip", "h-3 w-3") }} {{ a.filename }} · {{ a.rows }}</span>{% endfor %}
+    </div>
+    <iframe class="h-[80vh] w-full bg-canvas" sandbox srcdoc="{{ accounting_html|e }}"></iframe>
+  </section>
+  <section class="card overflow-hidden">
+    <div class="panel-head flex-wrap gap-2">
+      <h3 class="section-title">2 · Raport CFO dla Ciebie</h3>
+      <span class="text-xs text-ink-muted">{{ owner.subject }}</span>
+    </div>
+    <iframe class="h-[80vh] w-full bg-canvas" sandbox srcdoc="{{ owner_html|e }}"></iframe>
+  </section>
+</div>
+{% else %}
+<section class="card p-5 text-sm text-ink-soft">{{ result.error or result.skipped or "Brak danych" }}</section>
+{% endif %}
+{% endblock %}

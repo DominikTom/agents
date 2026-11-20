@@ -44,6 +44,7 @@ Jak używać:
 - „Dodaj / przypomnij mi / muszę” → add_item (kind: zadanie | decyzja | odpowiedz | czekam, due).
 - „Odpisałem mu / nie trzeba odpowiadać” na czekającą rozmowę → mark_handled.
 - Raporty: get_report_settings / update_report_settings (długość, sekcje, godzina, instrukcje), run_report, get_latest_report.
+  Poniedziałkowy audyt CFO (mail do księgowości + raport CFO dla Dominika): get_latest_report("weekly_audit") / ("audit_ksiegowosc").
 - Liczby: get_sales (sprzedaż per sklep), get_marketing (reklamy Meta + Google per sklep/marka). Marki = sklepy:
   MyBed (mybed.pl, mybed.de, mojepostel.cz), MittoHome (mittohome.pl), NOMO (nomosleep.pl). All Good Things i Delta
   Industries to spółki — nigdy nie traktuj ich jak sklepu. Nieprzypisane konto reklamowe → set_ad_account.
@@ -230,7 +231,9 @@ async def get_commitments(status: str = "open") -> str:
 
 @mcp.tool()
 async def get_latest_report(report: str = "morning_briefing") -> str:
-    """Latest generated report text. report: morning_briefing | daily_wrap | weekly_review."""
+    """Latest generated report text. report: morning_briefing | daily_wrap | weekly_review | weekly_audit (Monday CFO
+    report: Delta + AGT results, the weekly document audit and the agent's comment) | audit_ksiegowosc (the copy of the
+    Monday e-mail to the accounting office)."""
     db = _get_db()
     r = await db.get_latest_report(report)
     if not r:

@@ -27,7 +27,11 @@ DEFAULT_CRONS = {
     "slack_sync": "*/10 * * * *",
     "team_updates": "50 8,12,16,17,18,19 * * mon-fri",
     "live_refresh": "*/15 7-20 * * mon-sat",
+    # CFO Studio audits on Monday 04:30 UTC (5:30 / 6:30 Warsaw); the e-mails go out at 7:00 Warsaw
+    "weekly_audit": "0 7 * * mon",
 }
+# a missed run may still go out later in the morning (scheduler restarted around 7:00) — default 5 min
+MISFIRE_GRACE = {"weekly_audit": 3 * 3600}
 
 
 def _cron(expr: str) -> CronTrigger:
@@ -50,7 +54,7 @@ class AgentsScheduler:
         for name, (label, fn) in jobs.JOBS.items():
             expr = overrides.get(name, DEFAULT_CRONS[name])
             self.scheduler.add_job(fn, trigger=_cron(expr), id=name, name=label, replace_existing=True,
-                                   max_instances=1, coalesce=True, misfire_grace_time=300)
+                                   max_instances=1, coalesce=True, misfire_grace_time=MISFIRE_GRACE.get(name, 300))
             logger.info(f"Scheduled {name}: {expr}")
         self.scheduler.add_job(self.reload_reports, "interval", minutes=1, id="_reload_reports",
                                max_instances=1, coalesce=True)

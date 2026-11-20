@@ -11,3 +11,4 @@ node_modules/
 whatsapp-bridge/.wwebjs_auth/
 whatsapp-bridge/.wwebjs_cache/
 .pytest_cache/
+audit-preview/
