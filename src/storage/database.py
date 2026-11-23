@@ -210,6 +210,18 @@ CREATE INDEX IF NOT EXISTS idx_events_gmail_thread ON events ((metadata->>'threa
 ALTER TABLE reports ADD COLUMN IF NOT EXISTS title TEXT;
 ALTER TABLE reports ADD COLUMN IF NOT EXISTS html TEXT;
 ALTER TABLE reports ADD COLUMN IF NOT EXISTS meta JSONB DEFAULT '{}';
+
+-- Files sent with a report e-mail (e.g. the CSV lists of the weekly CFO audit) — downloadable in the panel
+CREATE TABLE IF NOT EXISTS report_files (
+    id SERIAL PRIMARY KEY,
+    report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL,
+    content_type TEXT,
+    content BYTEA NOT NULL,
+    rows INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (report_id, filename)
+);
 ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS details JSONB;
 
 -- Key/value settings edited from the panel (report profiles, preferences)
@@ -514,6 +526,27 @@ class Database:
 
     async def get_report(self, report_id: int) -> dict | None:
         return await self._fetchone("SELECT * FROM reports WHERE id = $1", report_id)
+
+    async def save_report_file(self, report_id: int, filename: str, content: bytes, content_type: str | None = None,
+                               rows: int | None = None) -> None:
+        await self._execute(
+            "INSERT INTO report_files (report_id, filename, content_type, content, rows) VALUES ($1, $2, $3, $4, $5) "
+            "ON CONFLICT (report_id, filename) DO UPDATE SET content = EXCLUDED.content, "
+            "content_type = EXCLUDED.content_type, rows = EXCLUDED.rows",
+            report_id, filename, content_type, content, rows,
+        )
+
+    async def get_report_file(self, report_id: int, filename: str) -> dict | None:
+        return await self._fetchone(
+            "SELECT filename, content_type, content FROM report_files WHERE report_id = $1 AND filename = $2",
+            report_id, filename,
+        )
+
+    async def list_report_files(self, report_id: int) -> list[dict]:
+        return await self._fetchall(
+            "SELECT filename, content_type, rows, length(content) AS size FROM report_files WHERE report_id = $1 "
+            "ORDER BY id", report_id,
+        )
 
     async def get_reports_count(self, agent_name: str | None = None) -> int:
         if agent_name:

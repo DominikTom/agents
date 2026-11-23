@@ -99,21 +99,35 @@
       {% if state.accounting %}<p class="text-xs text-ink-muted">Ostatni mail do księgowości: przebieg #{{ state.accounting.run_id }}, {{ state.accounting.at }}.</p>{% endif %}
     </section>
 
-    <section class="card overflow-hidden">
-      <div class="panel-head"><h3 class="section-title">Ostatnio</h3></div>
-      {% for r, lbl in [(last, "Raport CFO"), (last_copy, "Mail do księgowości"), (last_reminder, "Przypomnienie o dokumentach")] %}
-        {% if r %}
-        <a href="/reports/{{ r.id }}" class="row-item">
-          <span class="mt-0.5 text-ink-faint">{{ icon("file-text") }}</span>
-          <div class="min-w-0 flex-1">
-            <div class="text-sm font-medium text-ink">{{ lbl }}</div>
-            <div class="truncate text-xs text-ink-faint">{{ r.generated_at|ago }} · {{ r.title }}</div>
-          </div>
-        </a>
-        {% endif %}
-      {% endfor %}
-      {% if not last and not last_copy and not last_reminder %}<p class="px-5 py-4 text-sm text-ink-muted">Jeszcze nic nie wysłano.</p>{% endif %}
-    </section>
   </div>
 </form>
+
+<section class="card mt-5 overflow-hidden">
+  <div class="panel-head flex-wrap gap-2">
+    <h3 class="section-title">Historia wysyłek</h3>
+    <span class="text-xs text-ink-muted">Każdy mail do księgowości, raport CFO i przypomnienie — dokładnie w treści, w jakiej poszły, z plikami CSV. Kliknij, żeby otworzyć.</span>
+  </div>
+  {% for r in history %}{% set m = r.meta_d %}
+  <a href="/reports/{{ r.id }}" class="row-item !py-3">
+    <span class="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-primary-soft text-primary-ink">{{ icon({"Audyt → księgowość": "mail", "Przypomnienie o dokumentach": "bell"}.get(r.label, "chart-line")) }}</span>
+    <div class="min-w-0 flex-1">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-sm font-semibold text-ink">{{ r.label }}</span>
+        {% if m.preview %}<span class="badge bg-surface-2 text-ink-muted">test</span>{% endif %}
+        {% if m.kind == "audit_failed" %}<span class="badge bg-amber-50 text-amber-700">audyt się nie wykonał</span>
+        {% elif m.delivered and m.delivered.email %}<span class="badge bg-emerald-50 text-emerald-700">{{ icon("mail", "h-3 w-3") }} wysłany</span>
+        {% elif m.delivered and m.delivered.email_error %}<span class="badge bg-red-50 text-red-700">nie wysłany</span>{% endif %}
+        <span class="ml-auto shrink-0 font-mono text-[11px] text-ink-faint">{{ r.generated_at|short }}</span>
+      </div>
+      <div class="mt-0.5 truncate text-[13px] text-ink-muted">{{ r.title }}</div>
+      <div class="mt-0.5 truncate text-xs text-ink-faint">
+        {% if m.delivered and m.delivered.email %}do {{ m.delivered.email.to|join(", ") }}{% if m.delivered.email.cc %} · kopia: {{ m.delivered.email.cc|join(", ") }}{% endif %}{% elif m.delivered and m.delivered.email_error %}{{ m.delivered.email_error }}{% endif %}
+        {% if m.attachments %} · {{ m.attachments|length }} CSV{% endif %}{% if m.documents %} · prośba o {{ m.documents }} dok.{% endif %}{% if m.count %} · {{ m.count }} brakujących dok.{% endif %}
+      </div>
+    </div>
+  </a>
+  {% else %}
+  <p class="px-5 py-4 text-sm text-ink-muted">Jeszcze nic nie wysłano. Pierwszy mail do księgowości wyjdzie w poniedziałek o 7:00 (albo przyciskiem „Wyślij teraz”, gdy w CFO Studio jest dzisiejszy przebieg audytu).</p>
+  {% endfor %}
+</section>
 {% endblock %}

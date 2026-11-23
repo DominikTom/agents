@@ -13,7 +13,7 @@ from urllib.parse import quote, urlparse
 
 import yaml
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
@@ -333,10 +333,24 @@ async def report_detail_page(request: Request, report_id: int):
 
     profile = (await load_profiles(db)).get(report["agent_name"]) or {}
     audit = report["agent_name"] in AUDIT_KEYS
-    return render(request, "report_detail.html", "reports", report=report, meta=data.parse_meta(report),
+    files = {f["filename"] for f in await db.list_report_files(report_id)} if audit else set()
+    return render(request, "report_detail.html", "reports", report=report, meta=data.parse_meta(report), files=files,
                   labels=ALL_REPORT_LABELS, catalog=SECTION_CATALOG, slack_channel=(profile.get("slack_channel") or "").strip(),
                   studio_href="/studio/audit" if audit else f"/studio/{report['agent_name']}",
                   can_resend=report["agent_name"] not in ("audit_ksiegowosc", "audit_dokumenty"))
+
+
+@app.get("/reports/{report_id}/files/{filename}")
+async def report_file(request: Request, report_id: int, filename: str):
+    """A file sent with a report e-mail (CSV lists of the weekly CFO audit), exactly as it went out."""
+    if not authed(request):
+        return login_redirect(request)
+    f = await get_db_sync().get_report_file(report_id, filename)
+    if not f:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", f["filename"])
+    return Response(content=bytes(f["content"]), media_type=f.get("content_type") or "application/octet-stream",
+                    headers={"Content-Disposition": f'attachment; filename="{safe}"'})
 
 
 @app.post("/api/reports/{key}/run")
@@ -416,14 +430,15 @@ async def studio_audit_page(request: Request, saved: int = 0):
 
     db = get_db_sync()
     settings = await load_settings(db)
-    reports = await db.get_reports(agent_name="weekly_audit", limit=1)
-    copies = await db.get_reports(agent_name="audit_ksiegowosc", limit=1)
-    reminders = await db.get_reports(agent_name="audit_dokumenty", limit=1)
+    history = []
+    for key in AUDIT_KEYS:
+        for r in await db.get_reports(agent_name=key, limit=12):
+            history.append({**r, "meta_d": data.parse_meta(r), "label": AUDIT_KEYS[key]})
+    history.sort(key=lambda r: r["generated_at"], reverse=True)
     return render(
         request, "studio_audit.html", "studio", key="audit", profiles=await load_profiles(db), settings=settings,
         owner=await owner_addresses(db, settings), state=await db.get_setting(STATE_KEY, {}) or {}, models=MODEL_CHOICES,
-        last=reports[0] if reports else None, last_copy=copies[0] if copies else None,
-        last_reminder=reminders[0] if reminders else None, saved=saved,
+        history=history[:20], saved=saved,
         last_run=(await db.get_last_run_any(["weekly_audit"])).get("weekly_audit"), config=data.config_status(),
         doc_state=await db.get_setting("doc_reminder_state", {}) or {},
     )

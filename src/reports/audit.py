@@ -1391,8 +1391,15 @@ class WeeklyAudit:
             html=to_html(mail["markdown"]), sources_used=["cfo_studio"],
             meta={"kind": "audit_accounting", "run_id": run_id, "preview": test, "delivered": delivered,
                   "attachments": [{"filename": a["filename"], "rows": a["rows"]} for a in mail["attachments"]],
-                  "sources": "CFO Studio — audyt dokumentów (audit_report, audit_findings)"},
+                  "documents": mail.get("documents") or 0,
+                  "sources": "CFO Studio — audyt dokumentów (audit_report, audit_findings), prośby o dokumenty"},
         )
+        for a in mail["attachments"]:  # the CSVs as sent — downloadable on the report page
+            try:
+                await self.db.save_report_file(result["report_id"], a["filename"], a["content"], a.get("content_type"),
+                                               a.get("rows"))
+            except Exception as e:  # keeping the copy must never fail the run
+                logger.warning(f"Weekly audit: attachment {a['filename']} not stored: {e}")
         return result
 
     async def _send_owner(self, mail: dict, owner: list[str], run_id, test: bool) -> dict:

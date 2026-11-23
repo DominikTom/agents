@@ -392,6 +392,10 @@ class FakeDB:
         self.saved.append(kw)
         return len(self.saved)
 
+    async def save_report_file(self, report_id, filename, content, content_type=None, rows=None):
+        self.files = getattr(self, "files", {})
+        self.files[(report_id, filename)] = (content, content_type, rows)
+
 
 class FakeAI:
     async def write(self, **kw):
@@ -429,6 +433,9 @@ async def test_run_sends_accounting_mail_with_cc_and_csv_then_owner_report_once(
         assert word not in acc["html"]
     assert [s["agent_name"] for s in db.saved] == ["audit_ksiegowosc", "weekly_audit"]
     assert "Prosimy o dokumenty" in acc["html"] and "wrzućcie plik tutaj" in acc["html"]
+    # the CSVs are kept with the copy of the accounting e-mail, byte for byte as sent (panel: download on the report page)
+    assert {name for (rid, name) in db.files if rid == 1} == {a["filename"] for a in acc["attachments"]}
+    assert all(db.files[(1, a["filename"])][0] == a["content"] for a in acc["attachments"])
     assert db.settings["weekly_audit_state"]["accounting"]["run_id"] == 7
     # a second run (restart, retry, click) sends nothing
     again = await WeeklyAudit(db, client=FakeClient(), ai=FakeAI()).run(scheduled=True)
